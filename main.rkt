@@ -15,12 +15,24 @@
 ;   limitations under the License.
 
 (require "syntax.rkt")
+;(require macro-debugger/stepper-text)
 
-(react
- (init [(state "installed" #f)])
- (when [(state "installed" #f)]
-   (do (display "about to install\n"))
-   (exec "./doit.bash"
-         [#t (do (display "yay\n"))]
-         [#f (do (display "boo\n"))]))
-   (do (display "done\n")))
+;(expand/step-text #'(update [(state "installed" #t)
+;                             (state "ping" #t)])
+;                  (list #'update))
+
+(run
+ (react
+  (init [(state "installed" #f) ('foo "bar" "baz")])
+  (cond
+    (when [(state "installed" #f)]
+      (do (println "about to install"))
+      (exec "./doit.bash"
+            [#t (update [(state "installed" #t)
+                         (state "ping" #t)])]
+            [#f (do (println "boo"))])
+      (do (println "done")))
+    (when [(state "ping" #t)]
+      (do (println "confirmed"))
+      (update [(state "ping" #f)]))
+    )))

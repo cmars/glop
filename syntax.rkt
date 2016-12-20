@@ -14,13 +14,25 @@
 ;   See the License for the specific language governing permissions and
 ;   limitations under the License.
 
-(define-syntax (init x)
-  (syntax-case x ()
-    [(init [(category key value) ...])
-     (with-syntax ([ctx (datum->syntax (syntax init) 'ctx)])
-       (syntax
-        (lambda (ctx)
-          (hash-set! ctx '(category . key) value) ...)))]))
+(define context%
+  (class object%
+    (define slots (make-hash))
+    (define matches '())
+    (super-new)
+    (define/public (reset)
+      (set! matches '()))
+    (define/public (match key)
+      (println (list 'matched key))
+      (set! matches (cons key matches)))
+    (define/public (get-matches)
+      matches)
+    (define/public (matched?)
+      (empty? matches))
+    (define/public (get-slots)
+      slots)))
+
+(define state 'state)
+(define message 'message)
 
 (define-syntax (when x)
   (syntax-case x ()
@@ -28,12 +40,22 @@
      (with-syntax ([ctx (datum->syntax (syntax when) 'ctx)])
        (syntax
         (lambda (ctx)
-          (match ctx
-            [(hash-table ('(category . key) value) ...)
-             (body ctx) ...
-             ; TODO: mark context as having matched
-             ; TODO: push message key onto "matched message" stack
-             ]))))]))
+          (let ([slots (send ctx get-slots)])
+;            (println (list 'checking slots 'for '(category key value) ...))
+;            (println (andmap (lambda (item) (let ([k (cons (first item) (second item))]
+;                                               [v (third item)])
+;                                           (eq? (hash-ref slots k) v)))
+;                          (list '(category key value) ...)))
+            (if (andmap (lambda (item) (let ([k (cons (first item) (second item))]
+                                             [v (third item)])
+                                         (eq? (hash-ref slots k) v)))
+                        (list '(category key value) ...))
+                (begin
+;                  (println "hit!")
+                  (body ctx) ...
+                  (send ctx match (list (cons category key) ...)))
+                #f))
+            ctx)))]))
 
 (define-syntax (exec x)
   (syntax-case x ()
@@ -52,7 +74,8 @@
        (syntax
         (lambda (ctx)
           ; TODO: reject certain categories like messages?
-          (hash-set! ctx '(category . key) value) ...)))]))
+          (hash-set! (send ctx get-slots) (cons category key) value) ...
+          )))]))
 
 (define-syntax (do x)
   (syntax-case x ()
@@ -62,13 +85,27 @@
         (lambda (ctx)
           f ...)))]))
 
-(define-syntax react
-  (syntax-rules ()
-    [(react body ...)
-     ((lambda ()
-        (let ([ctx (make-hash)])
-          (body ctx) ...)))]))
+(define-syntax (react x)
+  (syntax-case x (init cond)
+    [(react (init [(category key value) ...]) (cond body ...))
+     (with-syntax ([ctx (datum->syntax (syntax do) 'ctx)])
+       (syntax
+        (lambda (arg)
+          (let ([ctx (if (is-a? arg context%)
+                         (let ([ctx+ arg])
+                           (send ctx+ reset)
+                           ctx+)
+                         (let ([ctx+ (new context%)])
+                           (hash-set! (send ctx+ get-slots) (cons category key) value) ...
+                           ctx+))])
+            (map (lambda (f) (f ctx)) (list body ...))
+            ctx))))]))
 
-(define state 'state)
+(define (run reactor)
+  (define (loop ctx)
+    (let ([ctx+ (reactor ctx)])
+      (sleep 1)
+      (loop ctx+)))
+  (loop #f))
 
 (provide (all-defined-out))
