@@ -22,12 +22,11 @@
     (define/public (reset)
       (set! matches '()))
     (define/public (match key)
-      (println (list 'matched key))
       (set! matches (cons key matches)))
     (define/public (get-matches)
       matches)
     (define/public (matched?)
-      (empty? matches))
+      (not (empty? matches)))
     (define/public (get-slots)
       slots)))
 
@@ -41,20 +40,12 @@
        (syntax
         (lambda (ctx)
           (let ([slots (send ctx get-slots)])
-;            (println (list 'checking slots 'for '(category key value) ...))
-;            (println (andmap (lambda (item) (let ([k (cons (first item) (second item))]
-;                                               [v (third item)])
-;                                           (eq? (hash-ref slots k) v)))
-;                          (list '(category key value) ...)))
-            (if (andmap (lambda (item) (let ([k (cons (first item) (second item))]
-                                             [v (third item)])
-                                         (eq? (hash-ref slots k) v)))
-                        (list '(category key value) ...))
+            (if (andmap (lambda (k v) (eq? (hash-ref slots k) v))
+                        (list '(category . key) ...) (list value ...))
                 (begin
-;                  (println "hit!")
                   (body ctx) ...
                   (send ctx match (list (cons category key) ...)))
-                #f))
+                null))
             ctx)))]))
 
 (define-syntax (exec x)
@@ -67,15 +58,13 @@
             [result (action ctx)] ...))))]))
 
 (define-syntax (update x)
-  ; TODO: consolidate with init?
   (syntax-case x ()
     [(update [(category key value) ...])
      (with-syntax ([ctx (datum->syntax (syntax update) 'ctx)])
        (syntax
         (lambda (ctx)
           ; TODO: reject certain categories like messages?
-          (hash-set! (send ctx get-slots) (cons category key) value) ...
-          )))]))
+          (hash-set! (send ctx get-slots) (cons category key) value) ...)))]))
 
 (define-syntax (do x)
   (syntax-case x ()
@@ -103,9 +92,12 @@
 
 (define (run reactor)
   (define (loop ctx)
-    (let ([ctx+ (reactor ctx)])
-      (sleep 1)
-      (loop ctx+)))
-  (loop #f))
+    (if (not (send ctx matched?))
+        (begin
+          (println "waiting...")
+          (sleep 1))
+        null)
+    (loop (reactor ctx)))
+  (loop (reactor null)))
 
 (provide (all-defined-out))
