@@ -40,7 +40,7 @@
        (syntax
         (lambda (ctx)
           (let ([slots (send ctx get-slots)])
-            (if (andmap (lambda (k v) (eq? (hash-ref slots k) v))
+            (if (andmap (lambda (k v) (and (hash-has-key? slots k) (eq? (hash-ref slots k) v)))
                         (list '(category . key) ...) (list value ...))
                 (begin
                   (body ctx) ...

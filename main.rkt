@@ -23,7 +23,7 @@
 
 (run
  (react
-  (init [(state "installed" #f) ('foo "bar" "baz")])
+  (init [(state "installed" #f)])
   (cond
     (when [(state "installed" #f)]
       (do (println "about to install"))
@@ -35,4 +35,7 @@
     (when [(state "ping" #t)]
       (do (println "confirmed"))
       (update [(state "ping" #f)]))
+    (when [('foo "bar" "baz")]
+      (do (println "get this foo outta here"))
+      (update [('foo "bar" null)]))
     )))
