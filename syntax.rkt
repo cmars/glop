@@ -21,8 +21,8 @@
     (super-new)
     (define/public (reset)
       (set! matches '()))
-    (define/public (match key)
-      (set! matches (cons key matches)))
+    (define/public (matched key)
+      (set! matches (append key matches)))
     (define/public (get-matches)
       matches)
     (define/public (matched?)
@@ -39,14 +39,15 @@
      (with-syntax ([ctx (datum->syntax (syntax when) 'ctx)])
        (syntax
         (lambda (ctx)
-          (let ([slots (send ctx get-slots)])
-            (if (andmap (lambda (k v) (and (hash-has-key? slots k) (eq? (hash-ref slots k) v)))
-                        (list '(category . key) ...) (list value ...))
+          (let* ([slots (send ctx get-slots)]
+                 [matches (filter (lambda (kv)
+                                    (and (hash-has-key? slots (first kv)) (eq? (hash-ref slots (first kv)) (second kv))))
+                                  (list '((category . key) value) ... ))])
+            (if (empty? matches) null
                 (begin
-                  (body ctx) ...
-                  (send ctx match (list (cons category key) ...)))
-                null))
-            ctx)))]))
+                  (send ctx matched (map first matches))
+                  (body ctx) ...))
+            ctx))))]))
 
 (define-syntax (exec x)
   (syntax-case x ()
@@ -74,6 +75,16 @@
         (lambda (ctx)
           f ...)))]))
 
+(define-syntax (acknowledge x)
+  (syntax-case x ()
+    [(acknowledge)
+     (with-syntax ([ctx (datum->syntax (syntax do) 'ctx)])
+       (syntax
+        (lambda (ctx)
+          (let ([slots (send ctx get-slots)])
+            (map (lambda (k) (hash-remove! slots k))
+                 (filter (lambda (k) (eq? (car k) message)) (send ctx get-matches)))))))]))
+
 (define-syntax (react x)
   (syntax-case x (init cond)
     [(react (init [(category key value) ...]) (cond body ...))
@@ -92,11 +103,12 @@
 
 (define (run reactor)
   (define (loop ctx)
-    (if (not (send ctx matched?))
-        (begin
-          (println "waiting...")
-          (sleep 1))
-        null)
+;    (if (not (send ctx matched?))
+;        (begin
+;          (println "waiting...")
+;          (sleep 1))
+;        null)
+    (sleep 1)
     (loop (reactor ctx)))
   (loop (reactor null)))
 
