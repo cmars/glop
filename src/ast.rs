@@ -1,10 +1,10 @@
 pub struct Match {
-    conditions: Vec<Box<Condition>>,
-    actions: Vec<Box<Action>>,
+    pub conditions: Vec<Box<Condition>>,
+    pub actions: Vec<Box<Action>>,
 }
 
 pub enum Condition {
-    Cmp(Box<Expr>, CmpOpcode, Box<Expr>),
+    Cmp(String, CmpOpcode, String),
     IsSet(String),
     Message(String),
 }
