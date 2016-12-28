@@ -1,0 +1,53 @@
+use std::str::FromStr;
+use ast;
+
+grammar;
+
+pub Glop: Vec<Box<ast::Match>> = {
+	Glop Match => ...,
+	Match => vec![<>],
+};
+
+Match: Box<ast::Match> = {
+	"match" "(" Conditions ")" "{" Actions "}"
+};
+
+Conditions: Vec<Box<ast::Condition>> = {
+	Conditions "," Condition => ...,
+	Condition => vec![<>],
+};
+
+Condition: Box<ast::Condition> = {
+	Identifier CmpOp Value => Box::new(ast::Condition::Cmp(<>)),
+	UnaryFunction,
+};
+
+Identifier: () = {
+	r"[a-z][a-z0-9_]+",
+};
+
+Value: () = {
+	r"\d+",
+};
+
+CmpOp: ast::CmpOpcode = {
+	"==" => ast::CmpOpcode::Equal,
+	"!=" => ast::CmpOpcode::NotEqual,
+};
+
+UnaryFunction: Box<ast::Condition> = {
+	"message" Identifier => Box::new(ast::Condition::Message(<>)),
+	"isset" Identifier => Box::new(ast::Condition::Defined(<>)),
+};
+
+Actions: Vec<Box<ast::Action>> = {
+	Actions ";" Action ";" => ...,
+	Action => vec![<>],
+};
+
+Action: Box<ast::Action> = {
+	"set" Identifier Value => Box::new(ast::Action::SetVar(<>)),
+	"unset" Identifier => Box::new(ast::Action::UnsetVar(<>)),
+	"acknowledge" => Box::new(ast::Action::Acknowledge),
+	"shell" "\"" Value "\"" => Box::new(ast::Action::Shell(<>)),
+};

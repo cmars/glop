@@ -1,0 +1,11 @@
+[package]
+name = "glop"
+version = "0.1.0"
+authors = ["Casey Marshall <glop@cmars.tech>"]
+build = "build.rs" # <-- We added this and everything after!
+
+[build-dependencies]
+lalrpop = "0.12.4"
+
+[dependencies]
+lalrpop-util = "0.12.4"
