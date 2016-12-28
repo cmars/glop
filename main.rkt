@@ -24,21 +24,19 @@
 (run
  (react
   (init [(state "installed" #f)])
-  (cond
-    
-    (when [(state "installed" #f)]
-      (do (println "about to install"))
-      (exec "./doit.bash"
-            [#t (update [(state "installed" #t)
-                         (message "ping" #t)])]
-            [#f (do (println "boo"))])
-      (do (println "done")))
-    
-    (when [(message "ping" #t)]
-      (do (println "pong"))
-      (acknowledge))
-    
-    (when [('never-matches "foo" "bar")]
-      (do (println "get this foo outta here")))
-    
-    )))
+  (when [(state "installed" #f)]
+    (do (println "about to install"))
+    (exec "./doit.bash"
+          [#t (update [(state "installed" #t)
+                       (message "ping" #t)])]
+          [#f (do (println "boo"))])
+    (do (println "done")))
+  
+  (when [(message "ping" #t)]
+    (do (println "pong"))
+    (acknowledge))
+  
+  (when [('never-matches "foo" "bar")]
+    (do (println "get this foo outta here")))
+  
+  ))

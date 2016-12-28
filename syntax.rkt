@@ -86,8 +86,8 @@
                  (filter (lambda (k) (eq? (car k) message)) (send ctx get-matches)))))))]))
 
 (define-syntax (react x)
-  (syntax-case x (init cond)
-    [(react (init [(category key value) ...]) (cond body ...))
+  (syntax-case x (init)
+    [(reactor (init [(category key value) ...]) body ...)
      (with-syntax ([ctx (datum->syntax (syntax do) 'ctx)])
        (syntax
         (lambda (arg)
@@ -101,7 +101,7 @@
             (map (lambda (f) (f ctx)) (list body ...))
             ctx))))]))
 
-(define (run reactor)
+(define (run r)
   (define (loop ctx)
 ;    (if (not (send ctx matched?))
 ;        (begin
@@ -109,7 +109,7 @@
 ;          (sleep 1))
 ;        null)
     (sleep 1)
-    (loop (reactor ctx)))
-  (loop (reactor null)))
+    (loop (r ctx)))
+  (loop (r null)))
 
 (provide (all-defined-out))
