@@ -2,20 +2,21 @@ use std::process::Command;
 use std::process::Stdio;
 use std::io::Write;
 
+pub mod ast;
 pub mod glop;
 
 fn main() {
-    assert!(glop::parse_Glop("
+    let g = glop::parse_Glop("
 match (message init) {
-      set installed = false
-        acknowledge m
-}
+      set installed false;
+        acknowledge;
+};
 
 match (installed == false) {
-      shell \"install-things.bash\"
-        set installed = true
-}
-"))
+      shell \"install-things.bash\";
+        set installed true;
+};
+").unwrap();
 
     let mut child = Command::new("cat")
         .stdin(Stdio::piped())

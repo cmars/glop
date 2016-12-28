@@ -1,53 +1,64 @@
 use std::str::FromStr;
-use ast;
+use ast::{Match, Condition, CmpOpcode, Action};
 
 grammar;
 
-pub Glop: Vec<Box<ast::Match>> = {
-	Glop Match => ...,
-	Match => vec![<>],
+pub Glop = Semicolon<Match>;
+
+Semicolon<T>: Vec<T> = {
+	<v:(<T> ";")*> <e:T?> => match e {
+		None => v,
+		Some(e) => {
+			let mut v = v;
+			v.push(e);
+			v
+		}
+	}
 };
 
-Match: Box<ast::Match> = {
-	"match" "(" Conditions ")" "{" Actions "}"
+Comma<T>: Vec<T> = {
+	<v:(<T> ",")*> <e:T?> => match e {
+		None => v,
+		Some(e) => {
+			let mut v = v;
+			v.push(e);
+			v
+		}
+	}
 };
 
-Conditions: Vec<Box<ast::Condition>> = {
-	Conditions "," Condition => ...,
-	Condition => vec![<>],
+Match: Box<Match> = {
+	"match" "(" <c:Conditions> ")" "{" <a:Actions> "}" => Box::new(Match{ conditions: c, actions: a }),
 };
 
-Condition: Box<ast::Condition> = {
-	Identifier CmpOp Value => Box::new(ast::Condition::Cmp(<>)),
+Conditions = Comma<Condition>;
+
+Condition: Box<Condition> = {
+	Identifier CmpOp QString => Box::new(Condition::Cmp(<>)),
 	UnaryFunction,
 };
 
-Identifier: () = {
-	r"[a-z][a-z0-9_]+",
+Identifier = r"[a-z][a-z0-9_]+";
+
+QString: String = {
+	<v:r##"[^"]+"##> => String::from(v),
 };
 
-Value: () = {
-	r"\d+",
+CmpOp: CmpOpcode = {
+	"==" => CmpOpcode::Equal,
+	"!=" => CmpOpcode::NotEqual,
 };
 
-CmpOp: ast::CmpOpcode = {
-	"==" => ast::CmpOpcode::Equal,
-	"!=" => ast::CmpOpcode::NotEqual,
+UnaryFunction: Box<Condition> = {
+	"message" <k:Identifier> => Box::new(Condition::Message(k)),
+	"isset" <k:Identifier> => Box::new(Condition::IsSet(k)),
 };
 
-UnaryFunction: Box<ast::Condition> = {
-	"message" Identifier => Box::new(ast::Condition::Message(<>)),
-	"isset" Identifier => Box::new(ast::Condition::Defined(<>)),
-};
+Actions = Semicolon<Action>;
 
-Actions: Vec<Box<ast::Action>> = {
-	Actions ";" Action ";" => ...,
-	Action => vec![<>],
-};
-
-Action: Box<ast::Action> = {
-	"set" Identifier Value => Box::new(ast::Action::SetVar(<>)),
-	"unset" Identifier => Box::new(ast::Action::UnsetVar(<>)),
-	"acknowledge" => Box::new(ast::Action::Acknowledge),
-	"shell" "\"" Value "\"" => Box::new(ast::Action::Shell(<>)),
+Action: Box<Action> = {
+	"set" <k:Identifier> <v:QString> => Box::new(Action::SetVar(k, v)),
+	"unset" <k:Identifier> => Box::new(Action::UnsetVar(k)),
+	"acknowledge" => Box::new(Action::Acknowledge),
+	"shell" QString => Box::new(Action::Shell(v)),
 };
