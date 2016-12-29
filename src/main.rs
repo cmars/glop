@@ -8,20 +8,20 @@ mod glop_grammar {
     include!(concat!(env!("OUT_DIR"), "/glop.rs"));
 }
 
-use self::glop_grammar::*;
-
 fn main() {
-    let g = glop(r#"match (message init) {
-      set installed false;
-        acknowledge init;
+    let g = glop_grammar::glop(r#"
+match (message init) {
+    set installed false;
+    acknowledge init;
 }
 
 match (installed == false) {
-      exec "install-things.bash";
-        set installed true;
+    exec "install-things.bash";
+    set installed true;
 }
 "#)
         .unwrap();
+    println!("{}", g);
 
     let mut child = Command::new("cat")
         .stdin(Stdio::piped())

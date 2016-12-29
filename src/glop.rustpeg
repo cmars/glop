@@ -1,8 +1,8 @@
-use ast::{Match, Condition, Action, CmpOpcode};
+use ast::*;
 
 #[pub]
-glop -> Vec<Box<Match>>
-	= __ ms:matches __ { ms }
+glop -> Box<Glop>
+	= __ ms:matches __ { let mut ms = ms; ms.reverse(); Box::new(Glop{ matches: ms }) }
 
 matches -> Vec<Box<Match>>
     = m:match __ ms:matches { let mut ms = ms; ms.push(m); ms }
