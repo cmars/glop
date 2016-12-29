@@ -11,10 +11,11 @@ fn main() {
     let g = grammar::glop(r#"
 match (message init) {
     set installed false;
+    set initialized true;
     acknowledge init;
 }
 
-match (installed == false) {
+match (installed == false, initialized == true) {
     exec "install-things.bash";
     set installed true;
 }

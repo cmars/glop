@@ -2,17 +2,19 @@ use ast::*;
 
 #[pub]
 glop -> Box<Glop>
-	= __ ms:matches __ { let mut ms = ms; ms.reverse(); Box::new(Glop{ matches: ms }) }
+    = __ ms:matches __ { Box::new(Glop{ matches: ms }) }
 
 matches -> Vec<Box<Match>>
-    = m:match __ ms:matches { let mut ms = ms; ms.push(m); ms }
+    = m:match __ ms:matches { let mut ms = ms; ms.insert(0, m); ms }
     / m:match { vec![m] }
 
 match -> Box<Match>
-    = "match" __ "(" __ c:conditions __ ")" __ "{" __ a:actions __ "}" { Box::new(Match{ conditions: c, actions: a }) }
+    = "match" __ "(" __ c:conditions __ ")" __ "{" __ a:actions __ "}" {
+        Box::new(Match{ conditions: c, actions: a })
+    }
 
 conditions -> Vec<Box<Condition>>
-    = c:condition __ "," __ cs:conditions { let mut cs = cs; cs.push(c); cs }
+    = c:condition __ "," __ cs:conditions { let mut cs = cs; cs.insert(0, c); cs }
     / c:condition { vec![c] }
 
 condition -> Box<Condition>
@@ -35,7 +37,7 @@ cmpop -> CmpOpcode
     / "!=" { CmpOpcode::NotEqual }
 
 actions -> Vec<Box<Action>>
-    = n:action __ ns:actions { let mut ns = ns; ns.push(n); ns }
+    = n:action __ ns:actions { let mut ns = ns; ns.insert(0, n); ns }
     / n:action { vec![n] }
 
 action -> Box<Action>
