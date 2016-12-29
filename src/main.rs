@@ -1,15 +1,14 @@
+extern crate glop;
+
 use std::process::Command;
 use std::process::Stdio;
 use std::io::Write;
 
-pub mod ast;
-
-mod glop_grammar {
-    include!(concat!(env!("OUT_DIR"), "/glop.rs"));
-}
+use glop::ast;
+use glop::grammar;
 
 fn main() {
-    let g = glop_grammar::glop(r#"
+    let g = grammar::glop(r#"
 match (message init) {
     set installed false;
     acknowledge init;
