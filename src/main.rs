@@ -3,20 +3,25 @@ use std::process::Stdio;
 use std::io::Write;
 
 pub mod ast;
-pub mod glop;
+
+mod glop_grammar {
+    include!(concat!(env!("OUT_DIR"), "/glop.rs"));
+}
+
+use self::glop_grammar::*;
 
 fn main() {
-    let g = glop::parse_Glop("
-match (message init) {
+    let g = glop(r#"match (message init) {
       set installed false;
-        acknowledge;
-};
+        acknowledge init;
+}
 
 match (installed == false) {
-      shell \"install-things.bash\";
+      exec "install-things.bash";
         set installed true;
-};
-").unwrap();
+}
+"#)
+        .unwrap();
 
     let mut child = Command::new("cat")
         .stdin(Stdio::piped())

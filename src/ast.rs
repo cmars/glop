@@ -17,7 +17,7 @@ pub enum CmpOpcode {
 pub enum Action {
     SetVar(String, String),
     UnsetVar(String),
-    Acknowledge,
-    Shell(String),
+    Acknowledge(String),
+    Exec(String),
     Script(String),
 }
