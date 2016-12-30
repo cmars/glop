@@ -45,7 +45,7 @@ struct Actions<'a>(&'a Vec<Box<Action>>);
 impl<'a> fmt::Display for Actions<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for i in self.0 {
-            try!(writeln!(f, "  {};", i));
+            try!(writeln!(f, "    {};", i));
         }
         Ok(())
     }
