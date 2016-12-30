@@ -1,10 +1,10 @@
 pub struct Glop {
-    pub matches: Vec<Box<Match>>,
+    pub matches: Vec<Match>,
 }
 
 pub struct Match {
-    pub conditions: Vec<Box<Condition>>,
-    pub actions: Vec<Box<Action>>,
+    pub conditions: Vec<Condition>,
+    pub actions: Vec<Action>,
 }
 
 pub enum Condition {
@@ -40,7 +40,7 @@ impl fmt::Display for Action {
     }
 }
 
-struct Actions<'a>(&'a Vec<Box<Action>>);
+struct Actions<'a>(&'a Vec<Action>);
 
 impl<'a> fmt::Display for Actions<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -70,7 +70,7 @@ impl fmt::Display for Condition {
     }
 }
 
-struct Conditions<'a>(&'a Vec<Box<Condition>>);
+struct Conditions<'a>(&'a Vec<Condition>);
 
 impl<'a> fmt::Display for Conditions<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

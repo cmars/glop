@@ -1,24 +1,24 @@
 use ast::*;
 
 #[pub]
-glop -> Box<Glop>
-    = __ ms:matches __ { Box::new(Glop{ matches: ms }) }
+glop -> Glop
+    = __ ms:matches __ { Glop{ matches: ms } }
 
-matches -> Vec<Box<Match>>
+matches -> Vec<Match>
     = m:match __ ms:matches { let mut ms = ms; ms.insert(0, m); ms }
     / m:match { vec![m] }
 
-match -> Box<Match>
+match -> Match
     = "match" __ "(" __ c:conditions __ ")" __ "{" __ a:actions __ "}" {
-        Box::new(Match{ conditions: c, actions: a })
+        Match{ conditions: c, actions: a }
     }
 
-conditions -> Vec<Box<Condition>>
+conditions -> Vec<Condition>
     = c:condition __ "," __ cs:conditions { let mut cs = cs; cs.insert(0, c); cs }
     / c:condition { vec![c] }
 
-condition -> Box<Condition>
-    = k:identifier __ op:cmpop __ v:value { Box::new(Condition::Cmp(k, op, v)) }
+condition -> Condition
+    = k:identifier __ op:cmpop __ v:value { Condition::Cmp(k, op, v) }
     / unaryfunc
 
 identifier -> String
@@ -28,23 +28,23 @@ value -> String
     = v:$([A-Za-z0-9_]+) { String::from(v) }
     / "\"" v:$([^"]+) "\"" { String::from(v) }
 
-unaryfunc -> Box<Condition>
-    = "message" __ k:identifier { Box::new(Condition::Message(k)) }
-    / "is_set" __ k:identifier { Box::new(Condition::IsSet(k)) }
+unaryfunc -> Condition
+    = "message" __ k:identifier { Condition::Message(k) }
+    / "is_set" __ k:identifier { Condition::IsSet(k) }
 
 cmpop -> CmpOpcode
     = "==" { CmpOpcode::Equal }
     / "!=" { CmpOpcode::NotEqual }
 
-actions -> Vec<Box<Action>>
+actions -> Vec<Action>
     = n:action __ ns:actions { let mut ns = ns; ns.insert(0, n); ns }
     / n:action { vec![n] }
 
-action -> Box<Action>
-    = "set" __ k:identifier __ v:value __ ";" { Box::new(Action::SetVar(k, v)) }
-    / "unset" __ k:identifier __ ";" { Box::new(Action::UnsetVar(k)) }
-    / "acknowledge" __ k:identifier __ ";" { Box::new(Action::Acknowledge(k)) }
-    / "exec" __ v:value __ ";" { Box::new(Action::Exec(v)) }
+action -> Action
+    = "set" __ k:identifier __ v:value __ ";" { Action::SetVar(k, v) }
+    / "unset" __ k:identifier __ ";" { Action::UnsetVar(k) }
+    / "acknowledge" __ k:identifier __ ";" { Action::Acknowledge(k) }
+    / "exec" __ v:value __ ";" { Action::Exec(v) }
 
 /* The following is borrowed from rust-peg's own grammar */
 
