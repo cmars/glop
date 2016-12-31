@@ -8,6 +8,7 @@ const SIMPLE_INIT: &'static str = r#"match (message init) { acknowledge init; }"
 const TWO_MSGS: &'static str =
     r#"match (message foo, message bar) { acknowledge foo; acknowledge bar; }"#;
 const SIMPLE_EQUAL: &'static str = r#"match (foo == bar) { unset foo; }"#;
+const SIMPLE_NOT_EQUAL: &'static str = r#"match (foo != bar) { set foo bar; }"#;
 
 fn parse_one_match(s: &str) -> ast::Match {
     let mut g = grammar::glop(s).unwrap();
@@ -69,7 +70,7 @@ fn matched_only_init_message() {
 }
 
 #[test]
-fn match_two_messages() {
+fn matched_two_messages() {
     let m_ast = parse_one_match(TWO_MSGS);
     let mut st = runtime::State::new();
     st.push_msg("foo", runtime::Msg::new());
@@ -91,7 +92,7 @@ fn match_two_messages() {
 }
 
 #[test]
-fn match_equal() {
+fn matched_equal() {
     let m_ast = parse_one_match(SIMPLE_EQUAL);
     {
         let mut st = runtime::State::new();
@@ -107,6 +108,31 @@ fn match_equal() {
     {
         let mut st = runtime::State::new();
         st.set_var("foo", "blah");
+        let m_exc = runtime::Match::new_from_ast(&m_ast);
+        match m_exc.eval(&mut st) {
+            Some(_) => panic!("unexpected match"),
+            None => {}
+        }
+    }
+}
+
+#[test]
+fn matched_not_equal() {
+    let m_ast = parse_one_match(SIMPLE_NOT_EQUAL);
+    {
+        let mut st = runtime::State::new();
+        st.set_var("foo", "blah");
+        let m_exc = runtime::Match::new_from_ast(&m_ast);
+        match m_exc.eval(&mut st) {
+            Some(ctx) => {
+                assert_eq!(ctx.seq, 1);
+            }
+            None => panic!("expected match"),
+        }
+    }
+    {
+        let mut st = runtime::State::new();
+        st.set_var("foo", "bar");
         let m_exc = runtime::Match::new_from_ast(&m_ast);
         match m_exc.eval(&mut st) {
             Some(_) => panic!("unexpected match"),
