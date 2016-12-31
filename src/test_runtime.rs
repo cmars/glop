@@ -9,6 +9,7 @@ const TWO_MSGS: &'static str =
     r#"match (message foo, message bar) { acknowledge foo; acknowledge bar; }"#;
 const SIMPLE_EQUAL: &'static str = r#"match (foo == bar) { unset foo; }"#;
 const SIMPLE_NOT_EQUAL: &'static str = r#"match (foo != bar) { set foo bar; }"#;
+const SIMPLE_IS_SET: &'static str = r#"match (is_set foo) { unset foo; }"#;
 
 fn parse_one_match(s: &str) -> ast::Match {
     let mut g = grammar::glop(s).unwrap();
@@ -92,7 +93,7 @@ fn matched_two_messages() {
 }
 
 #[test]
-fn matched_equal() {
+fn match_equal() {
     let m_ast = parse_one_match(SIMPLE_EQUAL);
     {
         let mut st = runtime::State::new();
@@ -117,7 +118,7 @@ fn matched_equal() {
 }
 
 #[test]
-fn matched_not_equal() {
+fn match_not_equal() {
     let m_ast = parse_one_match(SIMPLE_NOT_EQUAL);
     {
         let mut st = runtime::State::new();
@@ -133,6 +134,31 @@ fn matched_not_equal() {
     {
         let mut st = runtime::State::new();
         st.set_var("foo", "bar");
+        let m_exc = runtime::Match::new_from_ast(&m_ast);
+        match m_exc.eval(&mut st) {
+            Some(_) => panic!("unexpected match"),
+            None => {}
+        }
+    }
+}
+
+#[test]
+fn match_is_set() {
+    let m_ast = parse_one_match(SIMPLE_IS_SET);
+    {
+        let mut st = runtime::State::new();
+        st.set_var("foo", "bar");
+        let m_exc = runtime::Match::new_from_ast(&m_ast);
+        match m_exc.eval(&mut st) {
+            Some(ctx) => {
+                assert_eq!(ctx.seq, 1);
+            }
+            None => panic!("expected match"),
+        }
+    }
+    {
+        let mut st = runtime::State::new();
+        st.set_var("bar", "foo");
         let m_exc = runtime::Match::new_from_ast(&m_ast);
         match m_exc.eval(&mut st) {
             Some(_) => panic!("unexpected match"),
