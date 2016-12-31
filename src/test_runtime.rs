@@ -39,13 +39,14 @@ fn matched_init_message() {
             assert_eq!(ctx.seq, 1);
             assert!(ctx.msgs.contains_key("init"));
             assert_eq!(ctx.msgs.len(), 1);
+            m_exc.apply(&mut st);
         }
         None => panic!("expected match"),
     }
-    // match m_exc.eval(&mut st) {
-    // Some(_) => panic("unexpected match"),
-    // None => {}
-    // }
+    match m_exc.eval(&mut st) {
+        Some(_) => panic!("unexpected match"),
+        None => {}
+    }
 }
 
 #[test]
@@ -61,13 +62,14 @@ fn matched_only_init_message() {
             assert_eq!(ctx.seq, 1);
             assert!(ctx.msgs.contains_key("init"));
             assert_eq!(ctx.msgs.len(), 1);
+            m_exc.apply(&mut st);
         }
         None => panic!("expected match"),
     }
-    // match m_exc.eval(&mut st) {
-    // Some(_) => panic("unexpected match"),
-    // None => {}
-    // }
+    match m_exc.eval(&mut st) {
+        Some(_) => panic!("unexpected match"),
+        None => {}
+    }
 }
 
 #[test]
@@ -76,20 +78,25 @@ fn matched_two_messages() {
     let mut st = runtime::State::new();
     st.push_msg("foo", runtime::Msg::new());
     st.push_msg("bar", runtime::Msg::new());
+    st.push_msg("foo", runtime::Msg::new());
+    st.push_msg("bar", runtime::Msg::new());
     let m_exc = runtime::Match::new_from_ast(&m_ast);
-    match m_exc.eval(&mut st) {
-        Some(ctx) => {
-            assert_eq!(ctx.seq, 1);
-            assert!(ctx.msgs.contains_key("foo"));
-            assert!(ctx.msgs.contains_key("bar"));
-            assert_eq!(ctx.msgs.len(), 2);
+    for i in 1..3 {
+        match m_exc.eval(&mut st) {
+            Some(ctx) => {
+                assert_eq!(ctx.seq, i);
+                assert!(ctx.msgs.contains_key("foo"));
+                assert!(ctx.msgs.contains_key("bar"));
+                assert_eq!(ctx.msgs.len(), 2);
+                m_exc.apply(&mut st);
+            }
+            None => panic!("expected match"),
         }
-        None => panic!("expected match"),
     }
-    // match m_exc.eval(&mut st) {
-    // Some(_) => panic("unexpected match"),
-    // None => {}
-    // }
+    match m_exc.eval(&mut st) {
+        Some(_) => panic!("unexpected match"),
+        None => {}
+    }
 }
 
 #[test]
@@ -102,8 +109,14 @@ fn match_equal() {
         match m_exc.eval(&mut st) {
             Some(ctx) => {
                 assert_eq!(ctx.seq, 1);
+                m_exc.apply(&mut st);
             }
             None => panic!("expected match"),
+        }
+        // foo is now unset
+        match m_exc.eval(&mut st) {
+            Some(_) => panic!("unexpected match"),
+            None => {}
         }
     }
     {
@@ -152,8 +165,13 @@ fn match_is_set() {
         match m_exc.eval(&mut st) {
             Some(ctx) => {
                 assert_eq!(ctx.seq, 1);
+                m_exc.apply(&mut st)
             }
             None => panic!("expected match"),
+        }
+        match m_exc.eval(&mut st) {
+            Some(_) => panic!("unexpected match"),
+            None => {}
         }
     }
     {

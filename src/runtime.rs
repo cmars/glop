@@ -6,7 +6,8 @@ pub type Msg = HashMap<String, String>;
 
 pub struct Match {
     conditions: Vec<Condition>,
-    msg_topics: HashSet<String>, // actions Vec<Action>,
+    msg_topics: HashSet<String>,
+    actions: Vec<Action>,
 }
 
 impl Match {
@@ -14,6 +15,7 @@ impl Match {
         Match {
             conditions: vec![],
             msg_topics: HashSet::new(),
+            actions: vec![],
         }
     }
 
@@ -28,10 +30,9 @@ impl Match {
                 _ => (),
             }
         }
-        // for a_ast in m_ast.actions {
-        // m_exc.actions.push(Action::new(a_ast));
-        // TODO: plumbing for exec & script actions
-        //
+        for a_ast in &m_ast.actions {
+            m_exc.actions.push(Action::new(a_ast));
+        }
         m_exc
     }
 
@@ -50,6 +51,12 @@ impl Match {
         let mut ctx = ctx;
         ctx.seq = st.next_seq();
         Some(ctx)
+    }
+
+    pub fn apply(&self, st: &mut State) {
+        for action in &self.actions {
+            st.apply(action);
+        }
     }
 }
 
@@ -113,14 +120,22 @@ impl CmpOpcode {
     }
 }
 
-// enum Action {
-// SetVar(String, String),
-// UnsetVar(String),
-// Acknowledge(String),
-// Exec(String),
-//
+enum Action {
+    SetVar(String, String),
+    UnsetVar(String),
+    Acknowledge(String),
+}
 
-// type History = Vec<Context>;
+impl Action {
+    fn new(a_ast: &ast::Action) -> Action {
+        match a_ast {
+            &ast::Action::SetVar(ref k, ref v) => Action::SetVar(k.to_string(), v.to_string()),
+            &ast::Action::UnsetVar(ref k) => Action::UnsetVar(k.to_string()),
+            &ast::Action::Acknowledge(ref topic) => Action::Acknowledge(topic.to_string()),
+            _ => panic!(format!("action {} not implemented yet", a_ast)),
+        }
+    }
+}
 
 pub struct State {
     seq: i32,
@@ -173,46 +188,22 @@ impl State {
         next
     }
 
-    // fn apply(&mut self, action Action) {
-    // match op {
-    // SetVar(k, v) => &self.vars.insert(k, v),
-    // UnsetVar(k) => &self.vars.remove(k),
-    // Acknowledge(k) => match self.pending_msgs.get_mut(k) {
-    // Some(msgs) => msgs.pop(),
-    // None => (),
-    // }
-    // }
-    // }
-    //
+    fn apply(&mut self, action: &Action) {
+        match action {
+            &Action::SetVar(ref k, ref v) => {
+                self.vars.insert(k.to_string(), v.to_string());
+            }
+            &Action::UnsetVar(ref k) => {
+                self.vars.remove(k);
+            }
+            &Action::Acknowledge(ref k) => {
+                match self.pending_msgs.get_mut(k) {
+                    Some(v) => {
+                        v.pop();
+                    }
+                    None => {}
+                }
+            }
+        }
+    }
 }
-
-// struct Executive {
-// state State;
-// history History;
-// step Step;
-// }
-//
-// impl Executive {
-// fn begin_step(&mut self, match_stanza ast::Match) -> &Step {
-// let vars = &self.state.vars.clone();
-// let msgs = &self.state.next_messages();
-// &self.step = Step{
-// seq: &self.state.next_seq(),
-//
-// match_stanza: match_stanza,
-//
-// vars: &self.vars.clone(),
-// msgs: &self.state.next_messages(&match_stanza),
-// ops: &self.ops(&match_stanza),
-// };
-// &self.step
-// }
-//
-// fn end_step(&mut self, &step Step) {
-// for op in &step.ops.drain(..) {
-// &step.state.apply(op);
-// }
-// &self.history.push(&self.step);
-// }
-// }
-//
