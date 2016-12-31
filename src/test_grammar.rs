@@ -1,6 +1,5 @@
 #![cfg(test)]
 
-use super::ast;
 use super::grammar;
 
 #[test]
