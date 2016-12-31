@@ -62,7 +62,12 @@ pub struct Context {
 impl Context {
     fn eval(&self, cond: &Condition) -> bool {
         match cond {
-            &Condition::Cmp(ref l, ref op, ref r) => op.eval(l, r),
+            &Condition::Cmp(ref l, ref op, ref r) => {
+                match self.vars.get(l) {
+                    Some(v) => op.eval(v, r),
+                    None => false,
+                }
+            }
             &Condition::IsSet(ref k) => self.vars.contains_key(k),
             &Condition::Message(ref k) => self.msgs.contains_key(k),
         }
@@ -141,6 +146,10 @@ impl State {
             _ => {}
         }
         self.pending_msgs.insert(topic.to_string(), vec![msg]);
+    }
+
+    pub fn set_var(&mut self, key: &str, value: &str) {
+        self.vars.insert(key.to_string(), value.to_string());
     }
 
     fn next_seq(&mut self) -> i32 {
