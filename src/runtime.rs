@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::ast;
 
-type Msg = HashMap<String, String>;
+pub type Msg = HashMap<String, String>;
 
 pub struct Match {
     conditions: Vec<Condition>,
@@ -54,9 +54,9 @@ impl Match {
 }
 
 pub struct Context {
-    seq: i32,
-    vars: HashMap<String, String>,
-    msgs: HashMap<String, Msg>,
+    pub seq: i32,
+    pub vars: HashMap<String, String>,
+    pub msgs: HashMap<String, Msg>,
 }
 
 impl Context {
@@ -130,6 +130,17 @@ impl State {
             vars: HashMap::new(),
             pending_msgs: HashMap::new(),
         }
+    }
+
+    pub fn push_msg(&mut self, topic: &str, msg: Msg) {
+        match self.pending_msgs.get_mut(topic) {
+            Some(v) => {
+                v.push(msg);
+                return;
+            }
+            _ => {}
+        }
+        self.pending_msgs.insert(topic.to_string(), vec![msg]);
     }
 
     fn next_seq(&mut self) -> i32 {
