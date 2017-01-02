@@ -48,15 +48,48 @@ impl Value {
     pub fn from_int(i: i32) -> Value {
         Value::Int(i)
     }
+
     pub fn from_str(s: &str) -> Value {
         Value::Str(s.to_string())
     }
+
     pub fn from_obj(o: Obj) -> Value {
         Value::Object(o)
+    }
+
+    pub fn to_string(&self) -> String {
+        match self {
+            &Value::Int(ref i) => i.to_string(),
+            &Value::Str(ref s) => s.to_string(),
+            &Value::Object(_) => "{...}".to_string(), // FIXME
+        }
+    }
+
+    pub fn to_env(o: &Obj) -> Env {
+        Value::to_env_prefix(o, "").into_iter().collect()
+    }
+
+    fn to_env_prefix(o: &Obj, prefix: &str) -> Vec<(String, String)> {
+        o.iter()
+            .map(|(k, v)| {
+                let fqprefix = match prefix {
+                    "" => k.to_string(),
+                    _ => vec![prefix, k].join(".").to_string(),
+                };
+                match v {
+                    &Value::Object(ref child) => Value::to_env_prefix(child, &fqprefix),
+                    _ => vec![(fqprefix.clone(), v.to_string())],
+                }
+            })
+            .flat_map(|v| v.into_iter())
+            .collect()
     }
 }
 
 pub type Obj = HashMap<String, Value>;
+
+pub type Env = HashMap<String, String>;
+
 
 pub struct Identifier(Vec<String>);
 

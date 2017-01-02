@@ -125,3 +125,14 @@ fn unset_parent_exist() {
     assert_eq!(Identifier::from_str("apple.size").get(o), None);
     assert_eq!(Identifier::from_str("apple").get(o), None);
 }
+
+#[test]
+fn test_to_env() {
+    let o = &test_obj();
+    let e = Value::to_env(o);
+    assert_eq!(e.get("pi").unwrap(), "3.14");
+    assert_eq!(e.get("apple.color").unwrap(), "red");
+    assert_eq!(e.get("apple.size").unwrap(), "4");
+    assert_eq!(Identifier::from_str("apple.size").get(&o),
+               Some(&Value::from_int(4)))
+}
