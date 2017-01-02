@@ -3,6 +3,7 @@
 use super::ast;
 use super::grammar;
 use super::runtime;
+use super::value::{Identifier, Value};
 
 const SIMPLE_INIT: &'static str = r#"match (message init) { acknowledge init; }"#;
 const TWO_MSGS: &'static str =
@@ -22,7 +23,7 @@ fn unmatched_init_empty_state() {
     let m_ast = parse_one_match(SIMPLE_INIT);
     let mut st = runtime::State::new();
     let m_exc = runtime::Match::new_from_ast(&m_ast);
-    match m_exc.eval(&mut st) {
+    match st.eval(&m_exc) {
         Some(_) => panic!("unexpected match"),
         None => (),
     }
@@ -34,16 +35,16 @@ fn matched_init_message() {
     let mut st = runtime::State::new();
     st.push_msg("init", runtime::Msg::new());
     let m_exc = runtime::Match::new_from_ast(&m_ast);
-    match m_exc.eval(&mut st) {
+    match st.eval(&m_exc) {
         Some(ctx) => {
             assert_eq!(ctx.seq, 1);
             assert!(ctx.msgs.contains_key("init"));
             assert_eq!(ctx.msgs.len(), 1);
-            m_exc.apply(&mut st);
+            st.apply(&m_exc);
         }
         None => panic!("expected match"),
     }
-    match m_exc.eval(&mut st) {
+    match st.eval(&m_exc) {
         Some(_) => panic!("unexpected match"),
         None => {}
     }
@@ -55,18 +56,21 @@ fn matched_only_init_message() {
     let mut st = runtime::State::new();
     st.push_msg("init", runtime::Msg::new());
     st.push_msg("blah",
-                [("foo".to_string(), "bar".to_string())].iter().cloned().collect());
+                [("foo".to_string(), Value::Str("bar".to_string()))]
+                    .iter()
+                    .cloned()
+                    .collect());
     let m_exc = runtime::Match::new_from_ast(&m_ast);
-    match m_exc.eval(&mut st) {
+    match st.eval(&m_exc) {
         Some(ctx) => {
             assert_eq!(ctx.seq, 1);
             assert!(ctx.msgs.contains_key("init"));
             assert_eq!(ctx.msgs.len(), 1);
-            m_exc.apply(&mut st);
+            st.apply(&m_exc);
         }
         None => panic!("expected match"),
     }
-    match m_exc.eval(&mut st) {
+    match st.eval(&m_exc) {
         Some(_) => panic!("unexpected match"),
         None => {}
     }
@@ -82,18 +86,18 @@ fn matched_two_messages() {
     st.push_msg("bar", runtime::Msg::new());
     let m_exc = runtime::Match::new_from_ast(&m_ast);
     for i in 1..3 {
-        match m_exc.eval(&mut st) {
+        match st.eval(&m_exc) {
             Some(ctx) => {
                 assert_eq!(ctx.seq, i);
                 assert!(ctx.msgs.contains_key("foo"));
                 assert!(ctx.msgs.contains_key("bar"));
                 assert_eq!(ctx.msgs.len(), 2);
-                m_exc.apply(&mut st);
+                st.apply(&m_exc);
             }
             None => panic!("expected match"),
         }
     }
-    match m_exc.eval(&mut st) {
+    match st.eval(&m_exc) {
         Some(_) => panic!("unexpected match"),
         None => {}
     }
@@ -104,26 +108,26 @@ fn match_equal() {
     let m_ast = parse_one_match(SIMPLE_EQUAL);
     {
         let mut st = runtime::State::new();
-        st.set_var("foo", "bar");
+        st.set_var(&Identifier::from_str("foo"), Value::from_str("bar"));
         let m_exc = runtime::Match::new_from_ast(&m_ast);
-        match m_exc.eval(&mut st) {
+        match st.eval(&m_exc) {
             Some(ctx) => {
                 assert_eq!(ctx.seq, 1);
-                m_exc.apply(&mut st);
+                st.apply(&m_exc);
             }
             None => panic!("expected match"),
         }
         // foo is now unset
-        match m_exc.eval(&mut st) {
+        match st.eval(&m_exc) {
             Some(_) => panic!("unexpected match"),
             None => {}
         }
     }
     {
         let mut st = runtime::State::new();
-        st.set_var("foo", "blah");
+        st.set_var(&Identifier::from_str("foo"), Value::from_str("blah"));
         let m_exc = runtime::Match::new_from_ast(&m_ast);
-        match m_exc.eval(&mut st) {
+        match st.eval(&m_exc) {
             Some(_) => panic!("unexpected match"),
             None => {}
         }
@@ -135,9 +139,9 @@ fn match_not_equal() {
     let m_ast = parse_one_match(SIMPLE_NOT_EQUAL);
     {
         let mut st = runtime::State::new();
-        st.set_var("foo", "blah");
+        st.set_var(&Identifier::from_str("foo"), Value::from_str("blah"));
         let m_exc = runtime::Match::new_from_ast(&m_ast);
-        match m_exc.eval(&mut st) {
+        match st.eval(&m_exc) {
             Some(ctx) => {
                 assert_eq!(ctx.seq, 1);
             }
@@ -146,9 +150,9 @@ fn match_not_equal() {
     }
     {
         let mut st = runtime::State::new();
-        st.set_var("foo", "bar");
+        st.set_var(&Identifier::from_str("foo"), Value::from_str("bar"));
         let m_exc = runtime::Match::new_from_ast(&m_ast);
-        match m_exc.eval(&mut st) {
+        match st.eval(&m_exc) {
             Some(_) => panic!("unexpected match"),
             None => {}
         }
@@ -160,25 +164,25 @@ fn match_is_set() {
     let m_ast = parse_one_match(SIMPLE_IS_SET);
     {
         let mut st = runtime::State::new();
-        st.set_var("foo", "bar");
+        st.set_var(&Identifier::from_str("foo"), Value::from_str("bar"));
         let m_exc = runtime::Match::new_from_ast(&m_ast);
-        match m_exc.eval(&mut st) {
+        match st.eval(&m_exc) {
             Some(ctx) => {
                 assert_eq!(ctx.seq, 1);
-                m_exc.apply(&mut st)
+                st.apply(&m_exc)
             }
             None => panic!("expected match"),
         }
-        match m_exc.eval(&mut st) {
+        match st.eval(&m_exc) {
             Some(_) => panic!("unexpected match"),
             None => {}
         }
     }
     {
         let mut st = runtime::State::new();
-        st.set_var("bar", "foo");
+        st.set_var(&Identifier::from_str("bar"), Value::from_str("foo"));
         let m_exc = runtime::Match::new_from_ast(&m_ast);
-        match m_exc.eval(&mut st) {
+        match st.eval(&m_exc) {
             Some(_) => panic!("unexpected match"),
             None => {}
         }

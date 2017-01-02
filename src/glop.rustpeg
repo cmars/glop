@@ -21,15 +21,19 @@ condition -> Condition
     = k:identifier __ op:cmpop __ v:value { Condition::Cmp(k, op, v) }
     / unaryfunc
 
-identifier -> String
-    = v:$([a-z][a-z0-9_]+) { String::from(v) }
+identifier -> Identifier
+    = part:idpart "." rest:identifier { let mut rest = rest; rest.insert(0, part); rest }
+    / part:idpart { vec![part] }
+
+idpart -> String
+    = v:$([a-z][a-z0-9_^.]+) { String::from(v) }
 
 value -> String
     = v:$([A-Za-z0-9_]+) { String::from(v) }
     / "\"" v:$([^"]+) "\"" { String::from(v) }
 
 unaryfunc -> Condition
-    = "message" __ k:identifier { Condition::Message(k) }
+    = "message" __ k:identifier { Condition::Message(k.join(".")) }
     / "is_set" __ k:identifier { Condition::IsSet(k) }
 
 cmpop -> CmpOpcode
@@ -43,7 +47,7 @@ actions -> Vec<Action>
 action -> Action
     = "set" __ k:identifier __ v:value __ ";" { Action::SetVar(k, v) }
     / "unset" __ k:identifier __ ";" { Action::UnsetVar(k) }
-    / "acknowledge" __ k:identifier __ ";" { Action::Acknowledge(k) }
+    / "acknowledge" __ k:identifier __ ";" { Action::Acknowledge(k.join(".")) }
     / "exec" __ v:value __ ";" { Action::Exec(v) }
 
 /* The following is borrowed from rust-peg's own grammar */

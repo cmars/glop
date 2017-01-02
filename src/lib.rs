@@ -5,6 +5,8 @@ pub mod grammar {
 }
 
 pub mod runtime;
+mod value;
 
 mod test_grammar;
 mod test_runtime;
+mod test_value;
