@@ -35,11 +35,11 @@ use std::fmt;
 impl fmt::Display for Action {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            &Action::SetVar(ref k, ref v) => write!(f, "set {} {}", FmtIdentifier(k), v),
-            &Action::UnsetVar(ref k) => write!(f, "unset {}", FmtIdentifier(k)),
-            &Action::Acknowledge(ref k) => write!(f, "acknowledge {}", k),
-            &Action::Exec(ref v) => write!(f, r#"exec "{}""#, v),
-            &Action::Script(ref v) => write!(f, r#"script "{}""#, v),
+            &Action::SetVar(ref k, ref v) => write!(f, "set {} {};", FmtIdentifier(k), v),
+            &Action::UnsetVar(ref k) => write!(f, "unset {};", FmtIdentifier(k)),
+            &Action::Acknowledge(ref k) => write!(f, "acknowledge {};", k),
+            &Action::Exec(ref v) => write!(f, r#"exec {};"#, v),
+            &Action::Script(ref v) => write!(f, r#"script {}!#"#, v),
         }
     }
 }
@@ -57,7 +57,7 @@ impl<'a> Deref for FmtActions<'a> {
 impl<'a> fmt::Display for FmtActions<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for i in self.iter() {
-            try!(writeln!(f, "    {};", i));
+            try!(writeln!(f, "    {}", i));
         }
         Ok(())
     }

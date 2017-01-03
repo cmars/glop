@@ -11,7 +11,11 @@ fn round_trip_simple() {
 }
 
 match (installed == false, initialized == true) {
-    exec "install-things.bash";
+    exec install-things.bash;
+    script #!/bin/bash
+set -ex
+echo "hello world"
+!#
     set installed true;
 }
 
