@@ -38,13 +38,40 @@ impl Match {
     }
 }
 
-pub struct Context {
+type StatefulResult = Result<(), ()>;
+
+pub trait Stateful {
+    fn set_var(&mut self, key: &Identifier, value: Value);
+
+    fn unset_var(&mut self, key: &Identifier);
+
+    fn ack_msg(&mut self, topic: &str) -> StatefulResult;
+}
+
+pub struct Context<'a, 'b> {
     pub seq: i32,
     pub vars: HashMap<String, Value>,
     pub msgs: HashMap<String, Msg>,
+    pub applied: Vec<&'a Action>,
+    pub st: &'b mut State,
 }
 
-impl Context {
+impl<'a, 'b> Context<'a, 'b> {
+    pub fn apply(&mut self, m: &'a Match) -> StatefulResult {
+        for action in &m.actions {
+            try!(self.apply_action(&action));
+        }
+        self.commit()
+    }
+
+    fn commit(&mut self) -> StatefulResult {
+        for action in &self.applied {
+            try!(self.st.apply_action(action));
+        }
+        self.st.next_seq();
+        Ok(())
+    }
+
     fn eval(&self, cond: &Condition) -> bool {
         match cond {
             &Condition::Cmp(ref l, ref op, ref r) => {
@@ -55,6 +82,43 @@ impl Context {
             }
             &Condition::IsSet(ref k) => k.is_set(&self.vars),
             &Condition::Message(ref k) => self.msgs.contains_key(k),
+        }
+    }
+
+    fn apply_action(&mut self, action: &'a Action) -> StatefulResult {
+        let result = match action {
+            &Action::SetVar(ref k, ref v) => {
+                self.set_var(k, Value::Str(v.to_string()));
+                Ok(())
+            }
+            &Action::UnsetVar(ref k) => {
+                self.unset_var(k);
+                Ok(())
+            }
+            &Action::Acknowledge(ref k) => self.ack_msg(k),
+            // TODO: script & exec
+        };
+        match result {
+            Ok(_) => self.applied.push(action),
+            _ => {}
+        }
+        result
+    }
+}
+
+impl<'a, 'b> Stateful for Context<'a, 'b> {
+    fn set_var(&mut self, key: &Identifier, value: Value) {
+        key.set(&mut self.vars, value)
+    }
+
+    fn unset_var(&mut self, key: &Identifier) {
+        key.unset(&mut self.vars)
+    }
+
+    fn ack_msg(&mut self, topic: &str) -> StatefulResult {
+        match self.msgs.remove(topic) {
+            Some(_) => Ok(()),
+            None => Err(()),
         }
     }
 }
@@ -105,7 +169,7 @@ impl CmpOpcode {
     }
 }
 
-enum Action {
+pub enum Action {
     SetVar(Identifier, String),
     UnsetVar(Identifier),
     Acknowledge(String),
@@ -150,14 +214,6 @@ impl State {
         self.pending_msgs.insert(topic.to_string(), vec![msg]);
     }
 
-    pub fn set_var(&mut self, key: &Identifier, value: Value) {
-        key.set(&mut self.vars, value);
-    }
-
-    pub fn unset_var(&mut self, key: &Identifier) {
-        key.unset(&mut self.vars);
-    }
-
     fn next_seq(&mut self) -> i32 {
         self.seq += 1;
         self.seq
@@ -181,9 +237,11 @@ impl State {
 
     pub fn eval(&mut self, m: &Match) -> Option<Context> {
         let ctx = Context {
-            seq: -1,
+            seq: self.seq,
             vars: self.vars.clone(),
             msgs: self.next_messages(&m.msg_topics),
+            applied: vec![],
+            st: self,
         };
         let is_match = m.conditions
             .iter()
@@ -191,33 +249,42 @@ impl State {
         if !is_match {
             return None;
         }
-        let mut ctx = ctx;
-        ctx.seq = self.next_seq();
         Some(ctx)
     }
 
-    pub fn apply(&mut self, m: &Match) {
-        for action in &m.actions {
-            self.apply_action(&action);
-        }
-    }
-
-    fn apply_action(&mut self, action: &Action) {
-        match action {
+    fn apply_action(&mut self, action: &Action) -> StatefulResult {
+        let result = match action {
             &Action::SetVar(ref k, ref v) => {
                 self.set_var(k, Value::Str(v.to_string()));
+                Ok(())
             }
             &Action::UnsetVar(ref k) => {
                 self.unset_var(k);
+                Ok(())
             }
-            &Action::Acknowledge(ref k) => {
-                match self.pending_msgs.get_mut(k) {
-                    Some(v) => {
-                        v.pop();
-                    }
-                    None => {}
-                }
+            &Action::Acknowledge(ref k) => self.ack_msg(k),
+            // TODO: script & exec
+        };
+        result
+    }
+}
+
+impl Stateful for State {
+    fn set_var(&mut self, key: &Identifier, value: Value) {
+        key.set(&mut self.vars, value)
+    }
+
+    fn unset_var(&mut self, key: &Identifier) {
+        key.unset(&mut self.vars)
+    }
+
+    fn ack_msg(&mut self, topic: &str) -> StatefulResult {
+        match self.pending_msgs.get_mut(topic) {
+            Some(v) => {
+                v.pop();
+                Ok(())
             }
+            None => Err(()),
         }
     }
 }

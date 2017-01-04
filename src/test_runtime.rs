@@ -3,6 +3,7 @@
 use super::ast;
 use super::grammar;
 use super::runtime;
+use super::runtime::Stateful;
 use super::value::{Identifier, Value};
 
 const SIMPLE_INIT: &'static str = r#"match (message init) { acknowledge init; }"#;
@@ -36,11 +37,11 @@ fn matched_init_message() {
     st.push_msg("init", runtime::Msg::new());
     let m_exc = runtime::Match::new_from_ast(&m_ast);
     match st.eval(&m_exc) {
-        Some(ctx) => {
-            assert_eq!(ctx.seq, 1);
+        Some(ref mut ctx) => {
+            assert_eq!(ctx.seq, 0);
             assert!(ctx.msgs.contains_key("init"));
             assert_eq!(ctx.msgs.len(), 1);
-            st.apply(&m_exc);
+            assert!(ctx.apply(&m_exc).is_ok());
         }
         None => panic!("expected match"),
     }
@@ -62,11 +63,11 @@ fn matched_only_init_message() {
                     .collect());
     let m_exc = runtime::Match::new_from_ast(&m_ast);
     match st.eval(&m_exc) {
-        Some(ctx) => {
-            assert_eq!(ctx.seq, 1);
+        Some(ref mut ctx) => {
+            assert_eq!(ctx.seq, 0);
             assert!(ctx.msgs.contains_key("init"));
             assert_eq!(ctx.msgs.len(), 1);
-            st.apply(&m_exc);
+            assert!(ctx.apply(&m_exc).is_ok());
         }
         None => panic!("expected match"),
     }
@@ -85,14 +86,14 @@ fn matched_two_messages() {
     st.push_msg("foo", runtime::Msg::new());
     st.push_msg("bar", runtime::Msg::new());
     let m_exc = runtime::Match::new_from_ast(&m_ast);
-    for i in 1..3 {
+    for i in 0..2 {
         match st.eval(&m_exc) {
-            Some(ctx) => {
+            Some(ref mut ctx) => {
                 assert_eq!(ctx.seq, i);
                 assert!(ctx.msgs.contains_key("foo"));
                 assert!(ctx.msgs.contains_key("bar"));
                 assert_eq!(ctx.msgs.len(), 2);
-                st.apply(&m_exc);
+                assert!(ctx.apply(&m_exc).is_ok());
             }
             None => panic!("expected match"),
         }
@@ -111,9 +112,9 @@ fn match_equal() {
         st.set_var(&Identifier::from_str("foo"), Value::from_str("bar"));
         let m_exc = runtime::Match::new_from_ast(&m_ast);
         match st.eval(&m_exc) {
-            Some(ctx) => {
-                assert_eq!(ctx.seq, 1);
-                st.apply(&m_exc);
+            Some(ref mut ctx) => {
+                assert_eq!(ctx.seq, 0);
+                assert!(ctx.apply(&m_exc).is_ok());
             }
             None => panic!("expected match"),
         }
@@ -142,8 +143,8 @@ fn match_not_equal() {
         st.set_var(&Identifier::from_str("foo"), Value::from_str("blah"));
         let m_exc = runtime::Match::new_from_ast(&m_ast);
         match st.eval(&m_exc) {
-            Some(ctx) => {
-                assert_eq!(ctx.seq, 1);
+            Some(ref mut ctx) => {
+                assert_eq!(ctx.seq, 0);
             }
             None => panic!("expected match"),
         }
@@ -160,6 +161,35 @@ fn match_not_equal() {
 }
 
 #[test]
+fn simple_commit_progression() {
+    let m_exc_ne = runtime::Match::new_from_ast(&parse_one_match(SIMPLE_NOT_EQUAL));
+    let m_exc_eq = runtime::Match::new_from_ast(&parse_one_match(SIMPLE_EQUAL));
+    let mut st = runtime::State::new();
+    st.set_var(&Identifier::from_str("foo"), Value::from_str("blah"));
+    // foo starts out != bar so we expect a match and apply
+    match st.eval(&m_exc_ne) {
+        Some(ref mut ctx) => {
+            assert_eq!(ctx.seq, 0);
+            assert!(ctx.apply(&m_exc_ne).is_ok());
+        }
+        None => panic!("expected match"),
+    }
+    // above match sets foo == bar so m_exc_ne no longer matches
+    match st.eval(&m_exc_ne) {
+        Some(_) => panic!("unexpected match"),
+        None => {}
+    }
+    // now let's match on foo == bar, should match committed state now
+    match st.eval(&m_exc_eq) {
+        Some(ref mut ctx) => {
+            assert_eq!(ctx.seq, 1);
+            assert!(ctx.apply(&m_exc_eq).is_ok());
+        }
+        None => panic!("expected match"),
+    }
+}
+
+#[test]
 fn match_is_set() {
     let m_ast = parse_one_match(SIMPLE_IS_SET);
     {
@@ -167,9 +197,9 @@ fn match_is_set() {
         st.set_var(&Identifier::from_str("foo"), Value::from_str("bar"));
         let m_exc = runtime::Match::new_from_ast(&m_ast);
         match st.eval(&m_exc) {
-            Some(ctx) => {
-                assert_eq!(ctx.seq, 1);
-                st.apply(&m_exc)
+            Some(ref mut ctx) => {
+                assert_eq!(ctx.seq, 0);
+                assert!(ctx.apply(&m_exc).is_ok());
             }
             None => panic!("expected match"),
         }
