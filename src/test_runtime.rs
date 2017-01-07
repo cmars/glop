@@ -12,6 +12,22 @@ const TWO_MSGS: &'static str =
 const SIMPLE_EQUAL: &'static str = r#"match (foo == bar) { unset foo; }"#;
 const SIMPLE_NOT_EQUAL: &'static str = r#"match (foo != bar) { set foo bar; }"#;
 const SIMPLE_IS_SET: &'static str = r#"match (is_set foo) { unset foo; }"#;
+const SIMPLE_SCRIPT_OK: &'static str = r###"
+match (message init) {
+    script #!/bin/bash
+set -ex
+echo "hello world"
+!#
+}
+"###;
+const SIMPLE_SCRIPT_ERR: &'static str = r###"
+match (message init) {
+    script #!/bin/bash
+>&2 echo "crash and burn"
+exit 1
+!#
+}
+"###;
 
 fn parse_one_match(s: &str) -> ast::Match {
     let mut g = grammar::glop(s).unwrap();
@@ -216,5 +232,52 @@ fn match_is_set() {
             Some(_) => panic!("unexpected match"),
             None => {}
         }
+    }
+}
+
+#[test]
+fn simple_script() {
+    let m_ast = parse_one_match(SIMPLE_SCRIPT_OK);
+    let mut st = runtime::State::new();
+    st.push_msg("init", runtime::Msg::new());
+    let m_exc = runtime::Match::new_from_ast(&m_ast);
+    match st.eval(&m_exc) {
+        Some(ref mut ctx) => {
+            assert_eq!(ctx.seq, 0);
+            assert!(ctx.msgs.contains_key("init"));
+            assert_eq!(ctx.msgs.len(), 1);
+            assert!(ctx.apply(&m_exc).is_ok());
+        }
+        None => panic!("expected match"),
+    }
+}
+
+#[test]
+fn simple_script_err() {
+    let m_ast = parse_one_match(SIMPLE_SCRIPT_ERR);
+    let mut st = runtime::State::new();
+    st.push_msg("init", runtime::Msg::new());
+    let m_exc = runtime::Match::new_from_ast(&m_ast);
+    match st.eval(&m_exc) {
+        Some(ref mut ctx) => {
+            assert_eq!(ctx.seq, 0);
+            assert!(ctx.msgs.contains_key("init"));
+            assert_eq!(ctx.msgs.len(), 1);
+            match ctx.apply(&m_exc) {
+                Ok(()) => panic!("expected script to error"),
+                Err(e) => {
+                    match e {
+                        runtime::StatefulError::ScriptExec(rc, ref stderr) => {
+                            assert_eq!(rc, 1);
+                            assert_eq!(stderr, "crash and burn\n");
+                        }
+                        _ => {
+                            panic!("unexpected error: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+        None => panic!("expected match"),
     }
 }

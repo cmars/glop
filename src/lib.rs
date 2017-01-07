@@ -4,8 +4,9 @@ pub mod grammar {
     include!(concat!(env!("OUT_DIR"), "/glop.rs"));
 }
 
-pub mod runtime;
+mod cleanup;
 mod value;
+pub mod runtime;
 
 mod test_grammar;
 mod test_runtime;

@@ -1,6 +1,17 @@
 use std::collections::{HashMap, HashSet};
+use std::env;
+use std::error;
+use std::fmt;
+use std::fs::OpenOptions;
+use std::io;
+use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
+use std::process::Command;
+
+extern crate textnonce;
 
 use super::ast;
+use super::cleanup::Cleanup;
 use super::value::{Value, Identifier, Obj};
 
 pub type Msg = Obj;
@@ -38,7 +49,49 @@ impl Match {
     }
 }
 
-type StatefulResult = Result<(), ()>;
+type StatefulResult = Result<(), StatefulError>;
+
+#[derive(Debug)]
+pub enum StatefulError {
+    ScriptFile(io::Error),
+    ScriptExec(i32, String),
+    Acknowledge(String),
+}
+
+impl From<io::Error> for StatefulError {
+    fn from(err: io::Error) -> StatefulError {
+        StatefulError::ScriptFile(err)
+    }
+}
+
+impl fmt::Display for StatefulError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            StatefulError::ScriptFile(ref err) => write!(f, "Script file error: {}", err),
+            StatefulError::ScriptExec(code, ref stderr) => {
+                write!(f, "Script exit code {}: {}", code, stderr)
+            }
+            StatefulError::Acknowledge(ref topic) => write!(f, "Invalid acknowledge: {}", topic),
+        }
+    }
+}
+
+impl error::Error for StatefulError {
+    fn description(&self) -> &str {
+        match *self {
+            StatefulError::ScriptFile(ref err) => err.description(),
+            StatefulError::ScriptExec(_, ref stderr) => stderr,
+            StatefulError::Acknowledge(ref topic) => topic,
+        }
+    }
+
+    fn cause(&self) -> Option<&error::Error> {
+        match *self {
+            StatefulError::ScriptFile(ref err) => Some(err),
+            _ => None,
+        }
+    }
+}
 
 pub trait Stateful {
     fn set_var(&mut self, key: &Identifier, value: Value);
@@ -96,13 +149,41 @@ impl<'a, 'b> Context<'a, 'b> {
                 Ok(())
             }
             &Action::Acknowledge(ref k) => self.ack_msg(k),
-            // TODO: script & exec
+            &Action::Script(ref contents) => self.exec_script(contents),
+            // TODO: exec
         };
         match result {
             Ok(_) => self.applied.push(action),
             _ => {}
         }
         result
+    }
+
+    fn exec_script(&mut self, contents: &str) -> StatefulResult {
+        let mut script_path_buf = env::temp_dir();
+        script_path_buf.push(textnonce::TextNonce::sized_urlsafe(32).unwrap().into_string());
+        let script_path = script_path_buf.to_str().unwrap();
+        let cleanup = Cleanup::File(script_path.to_string());
+        {
+            let mut script_file =
+                OpenOptions::new().write(true).mode(0o700).create_new(true).open(script_path)?;
+            script_file.write_all(contents.as_bytes()).map_err(StatefulError::ScriptFile)?;
+        }
+        let output = Command::new(script_path).output().map_err(StatefulError::ScriptFile)?;
+        drop(cleanup);
+        if output.status.success() {
+            Ok(())
+        } else {
+            let code = match output.status.code() {
+                Some(value) => value,
+                None => 0,
+            };
+            let stderr = match String::from_utf8(output.stderr) {
+                Ok(s) => s,
+                Err(_) => "(stderr was invalid utf8)".to_string(),
+            };
+            Err(StatefulError::ScriptExec(code, stderr))
+        }
     }
 }
 
@@ -118,7 +199,7 @@ impl<'a, 'b> Stateful for Context<'a, 'b> {
     fn ack_msg(&mut self, topic: &str) -> StatefulResult {
         match self.msgs.remove(topic) {
             Some(_) => Ok(()),
-            None => Err(()),
+            None => Err(StatefulError::Acknowledge(topic.to_string())),
         }
     }
 }
@@ -173,6 +254,7 @@ pub enum Action {
     SetVar(Identifier, String),
     UnsetVar(Identifier),
     Acknowledge(String),
+    Script(String),
 }
 
 impl Action {
@@ -183,6 +265,7 @@ impl Action {
             }
             &ast::Action::UnsetVar(ref k) => Action::UnsetVar(Identifier::from_ast(k)),
             &ast::Action::Acknowledge(ref topic) => Action::Acknowledge(topic.to_string()),
+            &ast::Action::Script(ref contents) => Action::Script(contents.to_string()),
             _ => panic!(format!("action {} not implemented yet", a_ast)),
         }
     }
@@ -263,7 +346,8 @@ impl State {
                 Ok(())
             }
             &Action::Acknowledge(ref k) => self.ack_msg(k),
-            // TODO: script & exec
+            &Action::Script(_) => Ok(()),
+            // TODO: exec
         };
         result
     }
@@ -284,7 +368,7 @@ impl Stateful for State {
                 v.pop();
                 Ok(())
             }
-            None => Err(()),
+            None => Err(StatefulError::Acknowledge(topic.to_string())),
         }
     }
 }
