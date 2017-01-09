@@ -74,7 +74,7 @@ impl Value {
             .map(|(k, v)| {
                 let fqprefix = match prefix {
                     "" => k.to_string(),
-                    _ => vec![prefix, k].join(".").to_string(),
+                    _ => vec![prefix, k].join("__").to_string(),
                 };
                 match v {
                     &Value::Object(ref child) => Value::to_env_prefix(child, &fqprefix),

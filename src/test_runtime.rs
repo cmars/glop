@@ -28,6 +28,16 @@ exit 1
 !#
 }
 "###;
+const ENV_CHECK_SCRIPT: &'static str = r###"
+match (message test) {
+    set foo bar;
+    script #!/bin/bash
+env
+[ "${test__content}" == "hello world" ]
+!#
+    acknowledge test;
+}
+"###;
 
 fn parse_one_match(s: &str) -> ast::Match {
     let mut g = grammar::glop(s).unwrap();
@@ -277,6 +287,27 @@ fn simple_script_err() {
                     }
                 }
             }
+        }
+        None => panic!("expected match"),
+    }
+}
+
+#[test]
+fn env_check_script_ok() {
+    let m_ast = parse_one_match(ENV_CHECK_SCRIPT);
+    let mut st = runtime::State::new();
+    st.push_msg("test",
+                [("content".to_string(), Value::from_str("hello world"))]
+                    .iter()
+                    .cloned()
+                    .collect());
+    let m_exc = runtime::Match::new_from_ast(&m_ast);
+    match st.eval(&m_exc) {
+        Some(ref mut ctx) => {
+            assert_eq!(ctx.seq, 0);
+            assert!(ctx.msgs.contains_key("test"));
+            assert_eq!(ctx.msgs.len(), 1);
+            assert!(ctx.apply(&m_exc).is_ok());
         }
         None => panic!("expected match"),
     }

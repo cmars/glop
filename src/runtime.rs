@@ -169,7 +169,9 @@ impl<'a, 'b> Context<'a, 'b> {
                 OpenOptions::new().write(true).mode(0o700).create_new(true).open(script_path)?;
             script_file.write_all(contents.as_bytes()).map_err(StatefulError::ScriptFile)?;
         }
-        let output = Command::new(script_path).output().map_err(StatefulError::ScriptFile)?;
+        let mut cmd = &mut Command::new(script_path);
+        self.set_env(cmd);
+        let output = cmd.output().map_err(StatefulError::ScriptFile)?;
         drop(cleanup);
         if output.status.success() {
             Ok(())
@@ -182,7 +184,19 @@ impl<'a, 'b> Context<'a, 'b> {
                 Ok(s) => s,
                 Err(_) => "(stderr was invalid utf8)".to_string(),
             };
+            println!("stderr={}", stderr);
             Err(StatefulError::ScriptExec(code, stderr))
+        }
+    }
+
+    fn set_env(&self, cmd: &mut Command) {
+        for (k, v) in Value::to_env(&self.vars) {
+            cmd.env(k, v);
+        }
+        for (topic, msg) in &self.msgs {
+            for (k, v) in Value::to_env(&msg) {
+                cmd.env(vec![topic.clone(), k.to_string()].join("__"), v);
+            }
         }
     }
 }
