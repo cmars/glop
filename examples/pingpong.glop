@@ -1,0 +1,19 @@
+match (message init) {
+  set ping true;
+}
+
+match (ping == true) {
+  script #!/bin/bash
+echo ping
+!#
+  set ping false;
+  set pong true;
+}
+
+match (pong == true) {
+  script #!/bin/bash
+echo pong
+!#
+  set ping true;
+  set pong false;
+}

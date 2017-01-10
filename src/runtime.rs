@@ -7,6 +7,7 @@ use std::io;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::process::Command;
+use std::string;
 
 extern crate textnonce;
 
@@ -53,25 +54,33 @@ type StatefulResult = Result<(), StatefulError>;
 
 #[derive(Debug)]
 pub enum StatefulError {
-    ScriptFile(io::Error),
-    ScriptExec(i32, String),
+    IO(io::Error),
+    Exec(i32, String),
     Acknowledge(String),
+    StringConversion(string::FromUtf8Error),
 }
 
 impl From<io::Error> for StatefulError {
     fn from(err: io::Error) -> StatefulError {
-        StatefulError::ScriptFile(err)
+        StatefulError::IO(err)
+    }
+}
+
+impl From<string::FromUtf8Error> for StatefulError {
+    fn from(err: string::FromUtf8Error) -> StatefulError {
+        StatefulError::StringConversion(err)
     }
 }
 
 impl fmt::Display for StatefulError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            StatefulError::ScriptFile(ref err) => write!(f, "Script file error: {}", err),
-            StatefulError::ScriptExec(code, ref stderr) => {
+            StatefulError::IO(ref err) => write!(f, "Script file error: {}", err),
+            StatefulError::Exec(code, ref stderr) => {
                 write!(f, "Script exit code {}: {}", code, stderr)
             }
             StatefulError::Acknowledge(ref topic) => write!(f, "Invalid acknowledge: {}", topic),
+            StatefulError::StringConversion(ref err) => write!(f, "{}", err),
         }
     }
 }
@@ -79,15 +88,17 @@ impl fmt::Display for StatefulError {
 impl error::Error for StatefulError {
     fn description(&self) -> &str {
         match *self {
-            StatefulError::ScriptFile(ref err) => err.description(),
-            StatefulError::ScriptExec(_, ref stderr) => stderr,
+            StatefulError::IO(ref err) => err.description(),
+            StatefulError::Exec(_, ref stderr) => stderr,
             StatefulError::Acknowledge(ref topic) => topic,
+            StatefulError::StringConversion(ref err) => err.description(),
         }
     }
 
     fn cause(&self) -> Option<&error::Error> {
         match *self {
-            StatefulError::ScriptFile(ref err) => Some(err),
+            StatefulError::IO(ref err) => Some(err),
+            StatefulError::StringConversion(ref err) => Some(err),
             _ => None,
         }
     }
@@ -161,31 +172,37 @@ impl<'a, 'b> Context<'a, 'b> {
 
     fn exec_script(&mut self, contents: &str) -> StatefulResult {
         let mut script_path_buf = env::temp_dir();
-        script_path_buf.push(textnonce::TextNonce::sized_urlsafe(32).unwrap().into_string());
+        let script_path_base = textnonce::TextNonce::sized_urlsafe(32).unwrap().into_string();
+        script_path_buf.push(&script_path_base);
         let script_path = script_path_buf.to_str().unwrap();
         let cleanup = Cleanup::File(script_path.to_string());
         {
             let mut script_file =
                 OpenOptions::new().write(true).mode(0o700).create_new(true).open(script_path)?;
-            script_file.write_all(contents.as_bytes()).map_err(StatefulError::ScriptFile)?;
+            script_file.write_all(contents.as_bytes()).map_err(StatefulError::IO)?;
         }
         let mut cmd = &mut Command::new(script_path);
         self.set_env(cmd);
-        let output = cmd.output().map_err(StatefulError::ScriptFile)?;
+
+        // TODO: parent(this): create unix listener
+        // TODO: child(spawn): exec script process, wait for exit
+        // TODO: child: then close the listener
+        // TODO: parent: read actions from unix listener until closed, apply to ctx, append to
+        //       applied
+        let output = cmd.output().map_err(StatefulError::IO)?;
         drop(cleanup);
         if output.status.success() {
+            let stdout = String::from_utf8(output.stdout).map_err(StatefulError::StringConversion)?;
+            print!("{}", stdout);
             Ok(())
         } else {
             let code = match output.status.code() {
                 Some(value) => value,
                 None => 0,
             };
-            let stderr = match String::from_utf8(output.stderr) {
-                Ok(s) => s,
-                Err(_) => "(stderr was invalid utf8)".to_string(),
-            };
-            println!("stderr={}", stderr);
-            Err(StatefulError::ScriptExec(code, stderr))
+            let stderr = String::from_utf8(output.stderr).map_err(StatefulError::StringConversion)?;
+            print!("stderr={}", stderr);
+            Err(StatefulError::Exec(code, stderr))
         }
     }
 
