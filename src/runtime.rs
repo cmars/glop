@@ -8,6 +8,7 @@ use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::process::Command;
 use std::string;
+use std::sync::{Arc, Mutex};
 
 extern crate textnonce;
 
@@ -50,7 +51,7 @@ impl Match {
     }
 }
 
-type StatefulResult = Result<(), StatefulError>;
+type StatefulResult<T> = Result<T, StatefulError>;
 
 #[derive(Debug)]
 pub enum StatefulError {
@@ -58,6 +59,7 @@ pub enum StatefulError {
     Exec(i32, String),
     Acknowledge(String),
     StringConversion(string::FromUtf8Error),
+    UnsupportedAction,
 }
 
 impl From<io::Error> for StatefulError {
@@ -81,6 +83,7 @@ impl fmt::Display for StatefulError {
             }
             StatefulError::Acknowledge(ref topic) => write!(f, "Invalid acknowledge: {}", topic),
             StatefulError::StringConversion(ref err) => write!(f, "{}", err),
+            StatefulError::UnsupportedAction => write!(f, "unsupported action"),
         }
     }
 }
@@ -92,6 +95,7 @@ impl error::Error for StatefulError {
             StatefulError::Exec(_, ref stderr) => stderr,
             StatefulError::Acknowledge(ref topic) => topic,
             StatefulError::StringConversion(ref err) => err.description(),
+            StatefulError::UnsupportedAction => "unsupported action",
         }
     }
 
@@ -109,100 +113,19 @@ pub trait Stateful {
 
     fn unset_var(&mut self, key: &Identifier);
 
-    fn ack_msg(&mut self, topic: &str) -> StatefulResult;
+    fn ack_msg(&mut self, topic: &str) -> StatefulResult<()>;
 }
 
-pub struct Context<'a, 'b> {
-    pub seq: i32,
+pub struct Context {
     pub vars: HashMap<String, Value>,
     pub msgs: HashMap<String, Msg>,
-    pub applied: Vec<&'a Action>,
-    pub st: &'b mut State,
 }
 
-impl<'a, 'b> Context<'a, 'b> {
-    pub fn apply(&mut self, m: &'a Match) -> StatefulResult {
-        for action in &m.actions {
-            try!(self.apply_action(&action));
-        }
-        self.commit()
-    }
-
-    fn commit(&mut self) -> StatefulResult {
-        for action in &self.applied {
-            try!(self.st.apply_action(action));
-        }
-        self.st.next_seq();
-        Ok(())
-    }
-
-    fn eval(&self, cond: &Condition) -> bool {
-        match cond {
-            &Condition::Cmp(ref l, ref op, ref r) => {
-                match l.get(&self.vars) {
-                    Some(v) => op.eval(v, r),
-                    None => false,
-                }
-            }
-            &Condition::IsSet(ref k) => k.is_set(&self.vars),
-            &Condition::Message(ref k) => self.msgs.contains_key(k),
-        }
-    }
-
-    fn apply_action(&mut self, action: &'a Action) -> StatefulResult {
-        let result = match action {
-            &Action::SetVar(ref k, ref v) => {
-                self.set_var(k, Value::Str(v.to_string()));
-                Ok(())
-            }
-            &Action::UnsetVar(ref k) => {
-                self.unset_var(k);
-                Ok(())
-            }
-            &Action::Acknowledge(ref k) => self.ack_msg(k),
-            &Action::Script(ref contents) => self.exec_script(contents),
-            // TODO: exec
-        };
-        match result {
-            Ok(_) => self.applied.push(action),
-            _ => {}
-        }
-        result
-    }
-
-    fn exec_script(&mut self, contents: &str) -> StatefulResult {
-        let mut script_path_buf = env::temp_dir();
-        let script_path_base = textnonce::TextNonce::sized_urlsafe(32).unwrap().into_string();
-        script_path_buf.push(&script_path_base);
-        let script_path = script_path_buf.to_str().unwrap();
-        let cleanup = Cleanup::File(script_path.to_string());
-        {
-            let mut script_file =
-                OpenOptions::new().write(true).mode(0o700).create_new(true).open(script_path)?;
-            script_file.write_all(contents.as_bytes()).map_err(StatefulError::IO)?;
-        }
-        let mut cmd = &mut Command::new(script_path);
-        self.set_env(cmd);
-
-        // TODO: parent(this): create unix listener
-        // TODO: child(spawn): exec script process, wait for exit
-        // TODO: child: then close the listener
-        // TODO: parent: read actions from unix listener until closed, apply to ctx, append to
-        //       applied
-        let output = cmd.output().map_err(StatefulError::IO)?;
-        drop(cleanup);
-        if output.status.success() {
-            let stdout = String::from_utf8(output.stdout).map_err(StatefulError::StringConversion)?;
-            print!("{}", stdout);
-            Ok(())
-        } else {
-            let code = match output.status.code() {
-                Some(value) => value,
-                None => 0,
-            };
-            let stderr = String::from_utf8(output.stderr).map_err(StatefulError::StringConversion)?;
-            print!("stderr={}", stderr);
-            Err(StatefulError::Exec(code, stderr))
+impl Context {
+    fn new(st: &mut State, m: &Match) -> Context {
+        Context {
+            vars: st.vars.clone(),
+            msgs: st.next_messages(&m.msg_topics),
         }
     }
 
@@ -218,7 +141,122 @@ impl<'a, 'b> Context<'a, 'b> {
     }
 }
 
-impl<'a, 'b> Stateful for Context<'a, 'b> {
+pub struct Transaction<'b> {
+    pub seq: i32,
+    pub ctx: Arc<Mutex<Context>>,
+    pub applied: Vec<Action>,
+    pub st: &'b mut State,
+}
+
+impl<'b> Transaction<'b> {
+    fn new(st: &'b mut State, m: &Match) -> Transaction<'b> {
+        Transaction {
+            seq: st.seq,
+            ctx: Arc::new(Mutex::new(Context::new(st, m))),
+            applied: vec![],
+            st: st,
+        }
+    }
+
+    pub fn apply(&mut self, m: &Match) -> StatefulResult<()> {
+        for action in &m.actions {
+            try!(self.apply_action(&action));
+        }
+        self.commit()
+    }
+
+    fn commit(&mut self) -> StatefulResult<()> {
+        for action in &self.applied {
+            try!(self.st.apply_action(action));
+        }
+        self.st.next_seq();
+        Ok(())
+    }
+
+    fn eval(&self, cond: &Condition) -> bool {
+        let ctx = self.ctx.lock().unwrap();
+        match cond {
+            &Condition::Cmp(ref l, ref op, ref r) => {
+                match l.get(&ctx.vars) {
+                    Some(v) => op.eval(v, r),
+                    None => false,
+                }
+            }
+            &Condition::IsSet(ref k) => k.is_set(&ctx.vars),
+            &Condition::Message(ref k) => ctx.msgs.contains_key(k),
+        }
+    }
+
+    pub fn with_context<F>(&mut self, f: F) -> StatefulResult<()>
+        where F: Fn(&mut Context) -> StatefulResult<()>
+    {
+        let mut ctx = self.ctx.lock().unwrap();
+        f(&mut ctx)
+    }
+
+    fn apply_action(&mut self, action: &Action) -> StatefulResult<()> {
+        let mut actions = match action {
+            &Action::SetVar(ref k, ref v) => {
+                let mut ctx = self.ctx.lock().unwrap();
+                ctx.set_var(k, Value::Str(v.to_string()));
+                vec![action.clone()]
+            }
+            &Action::UnsetVar(ref k) => {
+                let mut ctx = self.ctx.lock().unwrap();
+                ctx.unset_var(k);
+                vec![action.clone()]
+            }
+            &Action::Acknowledge(ref k) => {
+                let mut ctx = self.ctx.lock().unwrap();
+                ctx.ack_msg(k)?;
+                vec![action.clone()]
+            }
+            &Action::Script(ref contents) => self.exec_script(contents)?,
+        };
+        self.applied.append(&mut actions);
+        Ok(())
+    }
+
+    fn exec_script(&mut self, contents: &str) -> StatefulResult<Vec<Action>> {
+        let ctx = self.ctx.lock().unwrap();
+
+        let mut script_path_buf = env::temp_dir();
+        let script_path_base = textnonce::TextNonce::sized_urlsafe(32).unwrap().into_string();
+        script_path_buf.push(&script_path_base);
+        let script_path = script_path_buf.to_str().unwrap();
+        let cleanup = Cleanup::File(script_path.to_string());
+        {
+            let mut script_file =
+                OpenOptions::new().write(true).mode(0o700).create_new(true).open(script_path)?;
+            script_file.write_all(contents.as_bytes()).map_err(StatefulError::IO)?;
+        }
+        let mut cmd = &mut Command::new(script_path);
+        ctx.set_env(cmd);
+
+        // TODO: parent(this): create unix listener
+        // TODO: child(spawn): exec script process, wait for exit
+        // TODO: child: then close the listener
+        // TODO: parent: read actions from unix listener until closed, apply to txn, append to
+        //       applied
+        let output = cmd.output().map_err(StatefulError::IO)?;
+        drop(cleanup);
+        if output.status.success() {
+            let stdout = String::from_utf8(output.stdout).map_err(StatefulError::StringConversion)?;
+            print!("{}", stdout);
+            Ok(vec![])
+        } else {
+            let code = match output.status.code() {
+                Some(value) => value,
+                None => 0,
+            };
+            let stderr = String::from_utf8(output.stderr).map_err(StatefulError::StringConversion)?;
+            print!("stderr={}", stderr);
+            Err(StatefulError::Exec(code, stderr))
+        }
+    }
+}
+
+impl Stateful for Context {
     fn set_var(&mut self, key: &Identifier, value: Value) {
         key.set(&mut self.vars, value)
     }
@@ -227,7 +265,7 @@ impl<'a, 'b> Stateful for Context<'a, 'b> {
         key.unset(&mut self.vars)
     }
 
-    fn ack_msg(&mut self, topic: &str) -> StatefulResult {
+    fn ack_msg(&mut self, topic: &str) -> StatefulResult<()> {
         match self.msgs.remove(topic) {
             Some(_) => Ok(()),
             None => Err(StatefulError::Acknowledge(topic.to_string())),
@@ -302,6 +340,17 @@ impl Action {
     }
 }
 
+impl Clone for Action {
+    fn clone(&self) -> Action {
+        match self {
+            &Action::SetVar(ref k, ref v) => Action::SetVar(k.clone(), v.clone()),
+            &Action::UnsetVar(ref k) => Action::UnsetVar(k.clone()),
+            &Action::Acknowledge(ref v) => Action::Acknowledge(v.clone()),
+            &Action::Script(ref v) => Action::Script(v.clone()),
+        }
+    }
+}
+
 pub struct State {
     seq: i32,
     vars: HashMap<String, Value>,
@@ -349,25 +398,19 @@ impl State {
         next
     }
 
-    pub fn eval(&mut self, m: &Match) -> Option<Context> {
-        let ctx = Context {
-            seq: self.seq,
-            vars: self.vars.clone(),
-            msgs: self.next_messages(&m.msg_topics),
-            applied: vec![],
-            st: self,
-        };
+    pub fn eval(&mut self, m: &Match) -> Option<Transaction> {
+        let txn = Transaction::new(self, m);
         let is_match = m.conditions
             .iter()
-            .fold(true, |acc, c| acc && ctx.eval(c));
+            .fold(true, |acc, c| acc && txn.eval(c));
         if !is_match {
             return None;
         }
-        Some(ctx)
+        Some(txn)
     }
 
-    fn apply_action(&mut self, action: &Action) -> StatefulResult {
-        let result = match action {
+    fn apply_action(&mut self, action: &Action) -> StatefulResult<()> {
+        match action {
             &Action::SetVar(ref k, ref v) => {
                 self.set_var(k, Value::Str(v.to_string()));
                 Ok(())
@@ -377,10 +420,8 @@ impl State {
                 Ok(())
             }
             &Action::Acknowledge(ref k) => self.ack_msg(k),
-            &Action::Script(_) => Ok(()),
-            // TODO: exec
-        };
-        result
+            _ => Err(StatefulError::UnsupportedAction),
+        }
     }
 }
 
@@ -393,7 +434,7 @@ impl Stateful for State {
         key.unset(&mut self.vars)
     }
 
-    fn ack_msg(&mut self, topic: &str) -> StatefulResult {
+    fn ack_msg(&mut self, topic: &str) -> StatefulResult<()> {
         match self.pending_msgs.get_mut(topic) {
             Some(v) => {
                 v.pop();

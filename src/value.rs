@@ -90,7 +90,6 @@ pub type Obj = HashMap<String, Value>;
 
 pub type Env = HashMap<String, String>;
 
-
 pub struct Identifier(Vec<String>);
 
 impl Identifier {
@@ -190,5 +189,11 @@ impl Identifier {
             }
             None => {}
         }
+    }
+}
+
+impl Clone for Identifier {
+    fn clone(&self) -> Identifier {
+        Identifier(self.0.clone())
     }
 }

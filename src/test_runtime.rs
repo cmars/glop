@@ -63,11 +63,15 @@ fn matched_init_message() {
     st.push_msg("init", runtime::Msg::new());
     let m_exc = runtime::Match::new_from_ast(&m_ast);
     match st.eval(&m_exc) {
-        Some(ref mut ctx) => {
-            assert_eq!(ctx.seq, 0);
-            assert!(ctx.msgs.contains_key("init"));
-            assert_eq!(ctx.msgs.len(), 1);
-            assert!(ctx.apply(&m_exc).is_ok());
+        Some(ref mut txn) => {
+            assert_eq!(txn.seq, 0);
+            assert!(txn.with_context(|ref mut ctx| {
+                    assert!(ctx.msgs.contains_key("init"));
+                    assert_eq!(ctx.msgs.len(), 1);
+                    Ok(())
+                })
+                .is_ok());
+            assert!(txn.apply(&m_exc).is_ok());
         }
         None => panic!("expected match"),
     }
@@ -89,11 +93,15 @@ fn matched_only_init_message() {
                     .collect());
     let m_exc = runtime::Match::new_from_ast(&m_ast);
     match st.eval(&m_exc) {
-        Some(ref mut ctx) => {
-            assert_eq!(ctx.seq, 0);
-            assert!(ctx.msgs.contains_key("init"));
-            assert_eq!(ctx.msgs.len(), 1);
-            assert!(ctx.apply(&m_exc).is_ok());
+        Some(ref mut txn) => {
+            assert_eq!(txn.seq, 0);
+            assert!(txn.with_context(|ref mut ctx| {
+                    assert!(ctx.msgs.contains_key("init"));
+                    assert_eq!(ctx.msgs.len(), 1);
+                    Ok(())
+                })
+                .is_ok());
+            assert!(txn.apply(&m_exc).is_ok());
         }
         None => panic!("expected match"),
     }
@@ -114,12 +122,16 @@ fn matched_two_messages() {
     let m_exc = runtime::Match::new_from_ast(&m_ast);
     for i in 0..2 {
         match st.eval(&m_exc) {
-            Some(ref mut ctx) => {
-                assert_eq!(ctx.seq, i);
-                assert!(ctx.msgs.contains_key("foo"));
-                assert!(ctx.msgs.contains_key("bar"));
-                assert_eq!(ctx.msgs.len(), 2);
-                assert!(ctx.apply(&m_exc).is_ok());
+            Some(ref mut txn) => {
+                assert_eq!(txn.seq, i);
+                assert!(txn.with_context(|ref mut ctx| {
+                        assert!(ctx.msgs.contains_key("foo"));
+                        assert!(ctx.msgs.contains_key("bar"));
+                        assert_eq!(ctx.msgs.len(), 2);
+                        Ok(())
+                    })
+                    .is_ok());
+                assert!(txn.apply(&m_exc).is_ok());
             }
             None => panic!("expected match"),
         }
@@ -138,9 +150,9 @@ fn match_equal() {
         st.set_var(&Identifier::from_str("foo"), Value::from_str("bar"));
         let m_exc = runtime::Match::new_from_ast(&m_ast);
         match st.eval(&m_exc) {
-            Some(ref mut ctx) => {
-                assert_eq!(ctx.seq, 0);
-                assert!(ctx.apply(&m_exc).is_ok());
+            Some(ref mut txn) => {
+                assert_eq!(txn.seq, 0);
+                assert!(txn.apply(&m_exc).is_ok());
             }
             None => panic!("expected match"),
         }
@@ -169,8 +181,8 @@ fn match_not_equal() {
         st.set_var(&Identifier::from_str("foo"), Value::from_str("blah"));
         let m_exc = runtime::Match::new_from_ast(&m_ast);
         match st.eval(&m_exc) {
-            Some(ref mut ctx) => {
-                assert_eq!(ctx.seq, 0);
+            Some(ref mut txn) => {
+                assert_eq!(txn.seq, 0);
             }
             None => panic!("expected match"),
         }
@@ -194,9 +206,9 @@ fn simple_commit_progression() {
     st.set_var(&Identifier::from_str("foo"), Value::from_str("blah"));
     // foo starts out != bar so we expect a match and apply
     match st.eval(&m_exc_ne) {
-        Some(ref mut ctx) => {
-            assert_eq!(ctx.seq, 0);
-            assert!(ctx.apply(&m_exc_ne).is_ok());
+        Some(ref mut txn) => {
+            assert_eq!(txn.seq, 0);
+            assert!(txn.apply(&m_exc_ne).is_ok());
         }
         None => panic!("expected match"),
     }
@@ -207,9 +219,9 @@ fn simple_commit_progression() {
     }
     // now let's match on foo == bar, should match committed state now
     match st.eval(&m_exc_eq) {
-        Some(ref mut ctx) => {
-            assert_eq!(ctx.seq, 1);
-            assert!(ctx.apply(&m_exc_eq).is_ok());
+        Some(ref mut txn) => {
+            assert_eq!(txn.seq, 1);
+            assert!(txn.apply(&m_exc_eq).is_ok());
         }
         None => panic!("expected match"),
     }
@@ -223,9 +235,9 @@ fn match_is_set() {
         st.set_var(&Identifier::from_str("foo"), Value::from_str("bar"));
         let m_exc = runtime::Match::new_from_ast(&m_ast);
         match st.eval(&m_exc) {
-            Some(ref mut ctx) => {
-                assert_eq!(ctx.seq, 0);
-                assert!(ctx.apply(&m_exc).is_ok());
+            Some(ref mut txn) => {
+                assert_eq!(txn.seq, 0);
+                assert!(txn.apply(&m_exc).is_ok());
             }
             None => panic!("expected match"),
         }
@@ -252,11 +264,15 @@ fn simple_script() {
     st.push_msg("init", runtime::Msg::new());
     let m_exc = runtime::Match::new_from_ast(&m_ast);
     match st.eval(&m_exc) {
-        Some(ref mut ctx) => {
-            assert_eq!(ctx.seq, 0);
-            assert!(ctx.msgs.contains_key("init"));
-            assert_eq!(ctx.msgs.len(), 1);
-            assert!(ctx.apply(&m_exc).is_ok());
+        Some(ref mut txn) => {
+            assert_eq!(txn.seq, 0);
+            assert!(txn.with_context(|ref mut ctx| {
+                    assert!(ctx.msgs.contains_key("init"));
+                    assert_eq!(ctx.msgs.len(), 1);
+                    Ok(())
+                })
+                .is_ok());
+            assert!(txn.apply(&m_exc).is_ok());
         }
         None => panic!("expected match"),
     }
@@ -269,11 +285,15 @@ fn simple_script_err() {
     st.push_msg("init", runtime::Msg::new());
     let m_exc = runtime::Match::new_from_ast(&m_ast);
     match st.eval(&m_exc) {
-        Some(ref mut ctx) => {
-            assert_eq!(ctx.seq, 0);
-            assert!(ctx.msgs.contains_key("init"));
-            assert_eq!(ctx.msgs.len(), 1);
-            match ctx.apply(&m_exc) {
+        Some(ref mut txn) => {
+            assert_eq!(txn.seq, 0);
+            assert!(txn.with_context(|ref mut ctx| {
+                    assert!(ctx.msgs.contains_key("init"));
+                    assert_eq!(ctx.msgs.len(), 1);
+                    Ok(())
+                })
+                .is_ok());
+            match txn.apply(&m_exc) {
                 Ok(()) => panic!("expected script to error"),
                 Err(e) => {
                     match e {
@@ -303,11 +323,15 @@ fn env_check_script_ok() {
                     .collect());
     let m_exc = runtime::Match::new_from_ast(&m_ast);
     match st.eval(&m_exc) {
-        Some(ref mut ctx) => {
-            assert_eq!(ctx.seq, 0);
-            assert!(ctx.msgs.contains_key("test"));
-            assert_eq!(ctx.msgs.len(), 1);
-            assert!(ctx.apply(&m_exc).is_ok());
+        Some(ref mut txn) => {
+            assert_eq!(txn.seq, 0);
+            assert!(txn.with_context(|ref mut ctx| {
+                    assert!(ctx.msgs.contains_key("test"));
+                    assert_eq!(ctx.msgs.len(), 1);
+                    Ok(())
+                })
+                .is_ok());
+            assert!(txn.apply(&m_exc).is_ok());
         }
         None => panic!("expected match"),
     }
