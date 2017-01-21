@@ -1,4 +1,17 @@
+#![cfg(unix)]
 #![cfg(test)]
+
+extern crate futures;
+extern crate libc;
+extern crate tokio_core;
+extern crate tokio_signal;
+
+use std::sync::mpsc::channel;
+use std::sync::{Once, ONCE_INIT, Mutex, MutexGuard};
+use std::thread;
+
+use self::tokio_core::reactor::{Core, Timeout};
+use self::tokio_signal::unix::Signal;
 
 use super::ast;
 use super::grammar;
@@ -38,6 +51,27 @@ env
     acknowledge test;
 }
 "###;
+
+static INIT: Once = ONCE_INIT;
+static mut LOCK: *mut Mutex<()> = 0 as *mut _;
+
+fn lock() -> MutexGuard<'static, ()> {
+    unsafe {
+        INIT.call_once(|| {
+            LOCK = Box::into_raw(Box::new(Mutex::new(())));
+            let (tx, rx) = channel();
+            thread::spawn(move || {
+                let mut lp = Core::new().unwrap();
+                let handle = lp.handle();
+                let _signal = lp.run(Signal::new(libc::SIGALRM, &handle)).unwrap();
+                tx.send(()).unwrap();
+                drop(lp.run(futures::empty::<(), ()>()));
+            });
+            rx.recv().unwrap();
+        });
+        (*LOCK).lock().unwrap()
+    }
+}
 
 fn parse_one_match(s: &str) -> ast::Match {
     let mut g = grammar::glop(s).unwrap();
@@ -259,6 +293,8 @@ fn match_is_set() {
 
 #[test]
 fn simple_script() {
+    let _lock = lock();
+
     let m_ast = parse_one_match(SIMPLE_SCRIPT_OK);
     let mut st = runtime::State::new();
     st.push_msg("init", runtime::Msg::new());
@@ -280,6 +316,8 @@ fn simple_script() {
 
 #[test]
 fn simple_script_err() {
+    let _lock = lock();
+
     let m_ast = parse_one_match(SIMPLE_SCRIPT_ERR);
     let mut st = runtime::State::new();
     st.push_msg("init", runtime::Msg::new());
@@ -314,6 +352,8 @@ fn simple_script_err() {
 
 #[test]
 fn env_check_script_ok() {
+    let _lock = lock();
+
     let m_ast = parse_one_match(ENV_CHECK_SCRIPT);
     let mut st = runtime::State::new();
     st.push_msg("test",
