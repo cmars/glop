@@ -1,3 +1,10 @@
+extern crate futures;
+extern crate textnonce;
+extern crate tokio_core;
+extern crate tokio_proto;
+extern crate tokio_process;
+extern crate tokio_service;
+
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::error;
@@ -6,14 +13,17 @@ use std::fs::OpenOptions;
 use std::io;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
-use std::process::Command;
+use std::process::{Command, Output};
 use std::string;
 use std::sync::{Arc, Mutex};
 
-extern crate textnonce;
+use self::futures::{future, Future, BoxFuture};
+use self::tokio_process::CommandExt;
+use self::tokio_service::Service;
 
 use super::ast;
 use super::cleanup::Cleanup;
+use super::script::{ScriptRequest, ScriptResponse, ServiceCodec};
 use super::value::{Value, Identifier, Obj};
 
 pub type Msg = Obj;
@@ -139,6 +149,11 @@ impl Context {
             }
         }
     }
+
+    fn get<'b>(&'b mut self, key: &Identifier) -> Option<&'b Value> {
+        key.get(&mut self.vars)
+        // FIXME: match messages in scope if vars don't match
+    }
 }
 
 pub struct Transaction<'b> {
@@ -218,8 +233,6 @@ impl<'b> Transaction<'b> {
     }
 
     fn exec_script(&mut self, contents: &str) -> StatefulResult<Vec<Action>> {
-        let ctx = self.ctx.lock().unwrap();
-
         let mut script_path_buf = env::temp_dir();
         let script_path_base = textnonce::TextNonce::sized_urlsafe(32).unwrap().into_string();
         script_path_buf.push(&script_path_base);
@@ -230,29 +243,9 @@ impl<'b> Transaction<'b> {
                 OpenOptions::new().write(true).mode(0o700).create_new(true).open(script_path)?;
             script_file.write_all(contents.as_bytes()).map_err(StatefulError::IO)?;
         }
-        let mut cmd = &mut Command::new(script_path);
-        ctx.set_env(cmd);
 
-        // TODO: parent(this): create unix listener
-        // TODO: child(spawn): exec script process, wait for exit
-        // TODO: child: then close the listener
-        // TODO: parent: read actions from unix listener until closed, apply to txn, append to
-        //       applied
-        let output = cmd.output().map_err(StatefulError::IO)?;
-        drop(cleanup);
-        if output.status.success() {
-            let stdout = String::from_utf8(output.stdout).map_err(StatefulError::StringConversion)?;
-            print!("{}", stdout);
-            Ok(vec![])
-        } else {
-            let code = match output.status.code() {
-                Some(value) => value,
-                None => 0,
-            };
-            let stderr = String::from_utf8(output.stderr).map_err(StatefulError::StringConversion)?;
-            print!("stderr={}", stderr);
-            Err(StatefulError::Exec(code, stderr))
-        }
+        let actions = run_script(self.ctx.clone(), script_path)?;
+        Ok(actions)
     }
 }
 
@@ -270,6 +263,78 @@ impl Stateful for Context {
             Some(_) => Ok(()),
             None => Err(StatefulError::Acknowledge(topic.to_string())),
         }
+    }
+}
+
+pub struct ScriptService {
+    ctx: Arc<Mutex<Context>>,
+}
+
+impl ScriptService {
+    fn new(ctx: Arc<Mutex<Context>>) -> ScriptService {
+        ScriptService { ctx: ctx }
+    }
+}
+
+impl Service for ScriptService {
+    // These types must match the corresponding protocol types:
+    type Request = ScriptRequest;
+    type Response = ScriptResponse;
+
+    // For non-streaming protocols, service errors are always io::Error
+    type Error = io::Error;
+
+    // The future for computing the response; box it for simplicity.
+    type Future = BoxFuture<Self::Response, Self::Error>;
+
+    // Produce a future for computing a response from a request.
+    fn call(&self, req: Self::Request) -> Self::Future {
+        let mut ctx = self.ctx.lock().unwrap();
+        let res = match req {
+            ScriptRequest::Get(ref k) => {
+                match ctx.get(&Identifier::from_str(k)) {
+                    Some(ref v) => ScriptResponse::Get(k.to_string(), v.to_string()),
+                    None => ScriptResponse::Get(k.to_string(), "".to_string()),
+                }
+            }
+            ScriptRequest::Set(ref k, ref v) => {
+                ctx.set_var(&Identifier::from_str(k), Value::from_str(v));
+                ScriptResponse::Set(k.to_string(), v.to_string())
+            }
+        };
+        future::ok(res).boxed()
+    }
+}
+
+fn run_script(ctx: Arc<Mutex<Context>>, script_path: &str) -> Result<Vec<Action>, StatefulError> {
+    let mut core = tokio_core::reactor::Core::new()?;
+    let handle = core.handle();
+
+    let addr = "127.0.0.1:0".parse().unwrap();
+    let listener = tokio_core::net::TcpListener::bind(&addr, &handle)?;
+    let listen_addr = &listener.local_addr()?;
+    let connections = listener.incoming();
+    let mut cmd = &mut Command::new(script_path);
+    {
+        let mut ctx = ctx.lock().unwrap();
+        ctx.set_env(cmd);
+    }
+    let child = cmd.env("ADDR", format!("{}", listen_addr))
+        .output_async(&handle);
+    match core.run(child) {
+        Ok(output) => {
+            if output.status.success() {
+                Ok(vec![])
+            } else {
+                let code = match output.status.code() {
+                    Some(value) => value,
+                    None => 0,
+                };
+                let stderr = String::from_utf8(output.stderr).unwrap();
+                Err(StatefulError::Exec(code, stderr))
+            }
+        }
+        Err(e) => Err(StatefulError::IO(e)),
     }
 }
 
