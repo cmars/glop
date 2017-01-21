@@ -120,6 +120,8 @@ impl error::Error for StatefulError {
 }
 
 pub trait Stateful {
+    fn get(&mut self, key: &Identifier) -> Option<&Value>;
+
     fn set_var(&mut self, key: &Identifier, value: Value);
 
     fn unset_var(&mut self, key: &Identifier);
@@ -149,11 +151,6 @@ impl Context {
                 cmd.env(vec![topic.clone(), k.to_string()].join("__"), v);
             }
         }
-    }
-
-    fn get<'b>(&'b mut self, key: &Identifier) -> Option<&'b Value> {
-        key.get(&mut self.vars)
-        // FIXME: match messages in scope if vars don't match
     }
 }
 
@@ -251,6 +248,11 @@ impl<'b> Transaction<'b> {
 }
 
 impl Stateful for Context {
+    fn get<'b>(&'b mut self, key: &Identifier) -> Option<&'b Value> {
+        key.get(&mut self.vars)
+        // FIXME: match messages in scope if vars don't match
+    }
+
     fn set_var(&mut self, key: &Identifier, value: Value) {
         key.set(&mut self.vars, value)
     }
@@ -523,6 +525,11 @@ impl State {
 }
 
 impl Stateful for State {
+    fn get<'b>(&'b mut self, key: &Identifier) -> Option<&'b Value> {
+        key.get(&mut self.vars)
+        // FIXME: match messages in scope if vars don't match
+    }
+
     fn set_var(&mut self, key: &Identifier, value: Value) {
         key.set(&mut self.vars, value)
     }

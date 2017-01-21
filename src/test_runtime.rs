@@ -51,6 +51,19 @@ env
     acknowledge test;
 }
 "###;
+const HELLO_SCRIPT_SERVER: &'static str = r###"
+match (message init) {
+    set foo bar;
+    script #!/bin/bash
+set -e
+[ -n "$ADDR" ]
+PORT=$(echo ${ADDR} | sed 's/.*://')
+nc 127.0.0.1 ${PORT} <<EOF
+set foo hello
+EOF
+!#
+}
+"###;
 
 static INIT: Once = ONCE_INIT;
 static mut LOCK: *mut Mutex<()> = 0 as *mut _;
@@ -375,4 +388,29 @@ fn env_check_script_ok() {
         }
         None => panic!("expected match"),
     }
+}
+
+#[test]
+fn hello_script_server() {
+    let _lock = lock();
+
+    let m_ast = parse_one_match(HELLO_SCRIPT_SERVER);
+    let mut st = runtime::State::new();
+    st.push_msg("init", runtime::Msg::new());
+    let m_exc = runtime::Match::new_from_ast(&m_ast);
+    match st.eval(&m_exc) {
+        Some(ref mut txn) => {
+            assert_eq!(txn.seq, 0);
+            assert!(txn.with_context(|ref mut ctx| {
+                    assert!(ctx.msgs.contains_key("init"));
+                    assert_eq!(ctx.msgs.len(), 1);
+                    Ok(())
+                })
+                .is_ok());
+            assert!(txn.apply(&m_exc).is_ok());
+        }
+        None => panic!("expected match"),
+    }
+    assert_eq!(st.get(&Identifier::from_str("foo")),
+               Some(&Value::from_str("hello")));
 }
