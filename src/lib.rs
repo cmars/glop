@@ -6,6 +6,7 @@ pub mod grammar {
 
 mod cleanup;
 mod value;
+mod script;
 pub mod runtime;
 
 mod test_grammar;
