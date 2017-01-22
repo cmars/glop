@@ -10,7 +10,7 @@ use std::sync::mpsc::channel;
 use std::sync::{Once, ONCE_INIT, Mutex, MutexGuard};
 use std::thread;
 
-use self::tokio_core::reactor::{Core, Timeout};
+use self::tokio_core::reactor::Core;
 use self::tokio_signal::unix::Signal;
 
 use super::ast;

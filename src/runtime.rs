@@ -13,7 +13,7 @@ use std::fs::OpenOptions;
 use std::io;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
-use std::process::{Command, Output};
+use std::process::Command;
 use std::string;
 use std::sync::{Arc, Mutex};
 
@@ -243,6 +243,7 @@ impl<'b> Transaction<'b> {
         }
 
         let actions = run_script(self.ctx.clone(), script_path)?;
+        drop(cleanup);
         Ok(actions)
     }
 }
@@ -328,7 +329,7 @@ fn run_script(ctx: Arc<Mutex<Context>>, script_path: &str) -> Result<Vec<Action>
     let connections = listener.incoming();
     let mut cmd = &mut Command::new(script_path);
     {
-        let mut ctx = ctx.lock().unwrap();
+        let ctx = ctx.lock().unwrap();
         ctx.set_env(cmd);
     }
     let actions = Arc::new(Mutex::new(vec![]));
@@ -354,7 +355,7 @@ fn run_script(ctx: Arc<Mutex<Context>>, script_path: &str) -> Result<Vec<Action>
         });
     let server = connections.for_each(move |(socket, _peer_addr)| {
             let (wr, rd) = socket.framed(ServiceCodec).split();
-            let mut service = ScriptService::new(ctx.clone(), server_actions.clone());
+            let service = ScriptService::new(ctx.clone(), server_actions.clone());
             let responses = rd.and_then(move |req| service.call(req));
             let responder = wr.send_all(responses).then(|_| Ok(()));
             handle.spawn(responder);
@@ -366,10 +367,8 @@ fn run_script(ctx: Arc<Mutex<Context>>, script_path: &str) -> Result<Vec<Action>
         Err((e, _)) => {
             return Err(e);
         }
-        x => x,
-    };
-    let result = actions.lock().unwrap().clone();
-    Ok(result)
+        Ok(_) => Ok(actions.lock().unwrap().clone()),
+    }
 }
 
 pub enum Condition {

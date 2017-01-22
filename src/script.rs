@@ -5,8 +5,7 @@ use std::io;
 use std::io::Write;
 use std::str;
 
-use self::tokio_core::io::{Codec, EasyBuf, Framed, Io};
-use self::tokio_proto::pipeline::ServerProto;
+use self::tokio_core::io::{Codec, EasyBuf};
 
 pub struct ServiceCodec;
 
@@ -75,22 +74,5 @@ impl Codec for ServiceCodec {
         }
         buf.push(b'\n');
         Ok(())
-    }
-}
-
-pub struct ServiceProto;
-
-impl<T: Io + 'static> ServerProto<T> for ServiceProto {
-    /// For this protocol style, `Request` matches the codec `In` type
-    type Request = ScriptRequest;
-
-    /// For this protocol style, `Response` matches the coded `Out` type
-    type Response = ScriptResponse;
-
-    /// A bit of boilerplate to hook in the codec:
-    type Transport = Framed<T, ServiceCodec>;
-    type BindTransport = Result<Self::Transport, io::Error>;
-    fn bind_transport(&self, io: T) -> Self::BindTransport {
-        Ok(io.framed(ServiceCodec))
     }
 }
