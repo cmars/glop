@@ -58,9 +58,19 @@ match (message init) {
 set -e
 [ -n "$ADDR" ]
 PORT=$(echo ${ADDR} | sed 's/.*://')
+
+# glop get foo
+FOO=$(nc 127.0.0.1 ${PORT} <<EOF
+get foo
+EOF)
+[ "$FOO" = "get foo -> bar" ]
+FOO=$(echo $FOO | awk '{print $4}')
+
+# glop set foo hello
 nc 127.0.0.1 ${PORT} <<EOF
-set foo hello
+set foo hello-${FOO}
 EOF
+
 !#
 }
 "###;
@@ -412,5 +422,5 @@ fn hello_script_server() {
         None => panic!("expected match"),
     }
     assert_eq!(st.get(&Identifier::from_str("foo")),
-               Some(&Value::from_str("hello")));
+               Some(&Value::from_str("hello-bar")));
 }

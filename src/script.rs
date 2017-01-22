@@ -49,7 +49,8 @@ impl Codec for ServiceCodec {
                     if fields.len() < 3 {
                         Err(io::Error::new(io::ErrorKind::Other, "set: missing key and/or value"))
                     } else {
-                        Ok(Some(ScriptRequest::Set(fields[1].to_string(), fields[2].to_string())))
+                        Ok(Some(ScriptRequest::Set(fields[1].to_string(),
+                                                   fields[2..].join(" ").to_string())))
                     }
                 }
                 _ => {
