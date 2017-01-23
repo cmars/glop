@@ -82,13 +82,17 @@ fn main() {
         .subcommand(SubCommand::with_name("agent")
             .about("run the interpreter agent")
             .arg(Arg::with_name("GLOPFILE").index(1).multiple(true).required(true)))
-        .subcommand(SubCommand::with_name("set")
+        .subcommand(SubCommand::with_name("getvar")
+            .about("get variable in context")
+            .arg(Arg::with_name("KEY").index(1).required(true)))
+        .subcommand(SubCommand::with_name("setvar")
             .about("set variable in context")
             .arg(Arg::with_name("KEY").index(1).required(true))
             .arg(Arg::with_name("VALUE").index(2).required(true)))
-        .subcommand(SubCommand::with_name("get")
-            .about("get value of variable or message content")
-            .arg(Arg::with_name("KEY").index(1).required(true)))
+        .subcommand(SubCommand::with_name("getmsg")
+            .about("get message in context")
+            .arg(Arg::with_name("TOPIC").index(1).required(true))
+            .arg(Arg::with_name("KEY").index(2).required(true)))
         .subcommand(SubCommand::with_name("send")
             .about("send a message")
             .arg(Arg::with_name("recipient").long("recipient").short("r").default_value("self"))
@@ -97,8 +101,9 @@ fn main() {
     let app_m = app.get_matches();
     let result = match app_m.subcommand_name() {
         Some("agent") => cmd_agent(app_m.subcommand_matches("agent").unwrap()),
-        Some("get") => cmd_get(app_m.subcommand_matches("get").unwrap()),
-        Some("set") => cmd_set(app_m.subcommand_matches("set").unwrap()),
+        Some("getvar") => cmd_getvar(app_m.subcommand_matches("getvar").unwrap()),
+        Some("setvar") => cmd_setvar(app_m.subcommand_matches("setvar").unwrap()),
+        Some("getmsg") => cmd_getmsg(app_m.subcommand_matches("getmsg").unwrap()),
         Some(subcmd) => {
             println!("unsupported command {}", subcmd);
             println!("{}", app_m.usage());
@@ -155,10 +160,10 @@ fn cmd_agent<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     }
 }
 
-fn cmd_get<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
+fn cmd_getvar<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let addr_str = env::var("ADDR").map_err(Error::Env)?;
     let addr = addr_str.parse().map_err(Error::AddrParse)?;
-    let cmd = format!("get {}", app_m.value_of("KEY").unwrap());
+    let cmd = format!("getvar {}", app_m.value_of("KEY").unwrap());
     let mut core = Core::new()?;
     let handle = core.handle();
     let socket = TcpStream::connect(&addr, &handle);
@@ -178,7 +183,7 @@ fn cmd_get<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
                 Some(v) => v.to_string(),
                 None => {
                     return Err(Error::IO(io::Error::new(io::ErrorKind::Other,
-                                                        "get: malformed response")));
+                                                        "getvar: malformed response")));
                 }
             }
         }
@@ -190,10 +195,10 @@ fn cmd_get<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     Ok(())
 }
 
-fn cmd_set<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
+fn cmd_setvar<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let addr_str = env::var("ADDR").map_err(Error::Env)?;
     let addr = addr_str.parse().map_err(Error::AddrParse)?;
-    let cmd = format!("set {} {}",
+    let cmd = format!("setvar {} {}",
                       app_m.value_of("KEY").unwrap(),
                       app_m.value_of("VALUE").unwrap());
     let mut core = Core::new()?;
@@ -214,4 +219,41 @@ fn cmd_set<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
             return Err(Error::IO(e));
         }
     }
+}
+
+fn cmd_getmsg<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
+    let addr_str = env::var("ADDR").map_err(Error::Env)?;
+    let addr = addr_str.parse().map_err(Error::AddrParse)?;
+    let cmd = format!("getmsg {} {}",
+                      app_m.value_of("TOPIC").unwrap(),
+                      app_m.value_of("KEY").unwrap());
+    let mut core = Core::new()?;
+    let handle = core.handle();
+    let socket = TcpStream::connect(&addr, &handle);
+    let request = socket.and_then(|mut sock| {
+        sock.write_all(cmd.as_bytes())?;
+        Ok(sock)
+    });
+    let response = request.and_then(|mut sock| {
+        let mut s = String::new();
+        sock.read_to_string(&mut s)?;
+        Ok(s)
+    });
+    let value = match core.run(response) {
+        Ok(data) => {
+            let mut values = data.split(" -> ");
+            match values.nth(1) {
+                Some(v) => v.to_string(),
+                None => {
+                    return Err(Error::IO(io::Error::new(io::ErrorKind::Other,
+                                                        "getmsg: malformed response")));
+                }
+            }
+        }
+        Err(e) => {
+            return Err(Error::IO(e));
+        }
+    };
+    println!("{}", value);
+    Ok(())
 }

@@ -53,18 +53,38 @@ set -e
 [ -n "$ADDR" ]
 PORT=$(echo ${ADDR} | sed 's/.*://')
 
-# glop get foo
+# glop getvar foo
 FOO=$(nc 127.0.0.1 ${PORT} <<EOF
-get foo
+getvar foo
 EOF)
-[ "$FOO" = "get foo -> bar" ]
+[ "$FOO" = "getvar foo -> bar" ]
 FOO=$(echo $FOO | awk '{print $4}')
 
-# glop set foo hello
+# glop setvar foo hello
 nc 127.0.0.1 ${PORT} <<EOF
-set foo hello-${FOO}
+setvar foo hello-${FOO}
 EOF
 
+!#
+}
+"###;
+const SCRIPT_SERVER_ACCESS_MSG: &'static str = r###"
+match (message init) {
+    script #!/bin/bash
+set -e
+[ -n "$ADDR" ]
+PORT=$(echo ${ADDR} | sed 's/.*://')
+
+# glop getmsg init foo
+FOO=$(nc 127.0.0.1 ${PORT} <<EOF
+getmsg init foo
+EOF)
+[ "$FOO" = "getmsg init foo -> bar" ]
+
+# glop setvar all good
+nc 127.0.0.1 ${PORT} <<EOF
+setvar all good
+EOF
 !#
 }
 "###;
@@ -203,6 +223,28 @@ fn hello_script_server() {
         }
         None => panic!("expected match"),
     }
-    assert_eq!(st.get(&Identifier::from_str("foo")),
+    assert_eq!(st.get_var(&Identifier::from_str("foo")),
                Some(&Value::from_str("hello-bar")));
+}
+
+#[test]
+fn script_server_access_msg() {
+    let _lock = lock();
+
+    let m_ast = parse_one_match(SCRIPT_SERVER_ACCESS_MSG);
+    let mut st = runtime::State::new();
+    st.push_msg("init",
+                [("foo".to_string(), Value::Str("bar".to_string()))]
+                    .iter()
+                    .cloned()
+                    .collect());
+    let m_exc = runtime::Match::new_from_ast(&m_ast);
+    match st.eval(&m_exc) {
+        Some(ref mut txn) => {
+            assert!(txn.apply(&m_exc).is_ok());
+        }
+        None => panic!("expected match"),
+    }
+    assert_eq!(st.get_var(&Identifier::from_str("all")),
+               Some(&Value::from_str("good")));
 }

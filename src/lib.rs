@@ -11,4 +11,5 @@ pub mod runtime;
 
 mod test_grammar;
 mod test_runtime;
+mod test_script;
 mod test_value;

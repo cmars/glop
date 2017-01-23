@@ -120,7 +120,7 @@ impl error::Error for StatefulError {
 }
 
 pub trait Stateful {
-    fn get(&mut self, key: &Identifier) -> Option<&Value>;
+    fn get_var(&mut self, key: &Identifier) -> Option<&Value>;
 
     fn set_var(&mut self, key: &Identifier, value: Value);
 
@@ -152,6 +152,13 @@ impl Context {
             }
         }
     }
+
+    fn get_msg<'a>(&'a mut self, topic: &str, key: &Identifier) -> Option<&'a Value> {
+        match self.msgs.get(topic) {
+            Some(ref obj) => key.get(obj),
+            None => None,
+        }
+    }
 }
 
 pub struct Transaction<'b> {
@@ -161,8 +168,8 @@ pub struct Transaction<'b> {
     pub st: &'b mut State,
 }
 
-impl<'b> Transaction<'b> {
-    fn new(st: &'b mut State, m: &Match) -> Transaction<'b> {
+impl<'a> Transaction<'a> {
+    fn new(st: &'a mut State, m: &Match) -> Transaction<'a> {
         Transaction {
             seq: st.seq,
             ctx: Arc::new(Mutex::new(Context::new(st, m))),
@@ -249,9 +256,8 @@ impl<'b> Transaction<'b> {
 }
 
 impl Stateful for Context {
-    fn get<'b>(&'b mut self, key: &Identifier) -> Option<&'b Value> {
+    fn get_var<'b>(&'b mut self, key: &Identifier) -> Option<&'b Value> {
         key.get(&mut self.vars)
-        // FIXME: match messages in scope if vars don't match
     }
 
     fn set_var(&mut self, key: &Identifier, value: Value) {
@@ -299,20 +305,30 @@ impl Service for ScriptService {
     fn call(&self, req: Self::Request) -> Self::Future {
         let mut ctx = self.ctx.lock().unwrap();
         let res = match req {
-            ScriptRequest::Get(ref k) => {
-                match ctx.get(&Identifier::from_str(k)) {
-                    Some(ref v) => ScriptResponse::Get(k.to_string(), v.to_string()),
-                    None => ScriptResponse::Get(k.to_string(), "".to_string()),
+            ScriptRequest::GetVar(ref k) => {
+                match ctx.get_var(&Identifier::from_str(k)) {
+                    Some(ref v) => ScriptResponse::GetVar(k.to_string(), v.to_string()),
+                    None => ScriptResponse::GetVar(k.to_string(), "".to_string()),
                 }
             }
-            ScriptRequest::Set(ref k, ref v) => {
+            ScriptRequest::SetVar(ref k, ref v) => {
                 let id = Identifier::from_str(k);
                 ctx.set_var(&id, Value::from_str(v));
                 drop(ctx);
                 let mut actions = self.actions.lock().unwrap();
                 actions.push(Action::SetVar(id, v.to_string()));
                 drop(actions);
-                ScriptResponse::Set(k.to_string(), v.to_string())
+                ScriptResponse::SetVar(k.to_string(), v.to_string())
+            }
+            ScriptRequest::GetMsg(ref topic, ref k) => {
+                match ctx.get_msg(topic, &Identifier::from_str(k)) {
+                    Some(ref v) => {
+                        ScriptResponse::GetMsg(topic.to_string(), k.to_string(), v.to_string())
+                    }
+                    None => {
+                        ScriptResponse::GetMsg(topic.to_string(), k.to_string(), "".to_string())
+                    }
+                }
             }
         };
         future::ok(res).boxed()
@@ -524,9 +540,8 @@ impl State {
 }
 
 impl Stateful for State {
-    fn get<'b>(&'b mut self, key: &Identifier) -> Option<&'b Value> {
+    fn get_var<'b>(&'b mut self, key: &Identifier) -> Option<&'b Value> {
         key.get(&mut self.vars)
-        // FIXME: match messages in scope if vars don't match
     }
 
     fn set_var(&mut self, key: &Identifier, value: Value) {
