@@ -160,7 +160,7 @@ fn simple_script_err() {
                 Ok(()) => panic!("expected script to error"),
                 Err(e) => {
                     match e {
-                        runtime::StatefulError::Exec(rc, ref stderr) => {
+                        runtime::Error::Exec(rc, ref stderr) => {
                             assert_eq!(rc, 1);
                             assert_eq!(stderr, "crash and burn\n");
                         }

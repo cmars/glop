@@ -1,12 +1,12 @@
-pub mod ast;
+mod ast;
+mod cleanup;
+mod value;
+mod script;
 
 pub mod grammar {
     include!(concat!(env!("OUT_DIR"), "/glop.rs"));
 }
-
-mod cleanup;
-mod value;
-mod script;
+pub mod error;
 pub mod runtime;
 
 mod test_grammar;

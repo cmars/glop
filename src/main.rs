@@ -2,12 +2,8 @@ extern crate clap;
 extern crate futures;
 extern crate tokio_core;
 
-use std::env;
-use std::fmt;
 use std::fs::File;
-use std::io;
 use std::io::{Read, Write};
-use std::net;
 use std::process::exit;
 use std::sync::mpsc;
 use std::{thread, time};
@@ -20,59 +16,9 @@ use tokio_core::reactor::Core;
 extern crate glop;
 use glop::grammar;
 use glop::runtime;
+use glop::error::Error;
 
 type AppResult<T> = Result<T, Error>;
-
-#[derive(Debug)]
-pub enum Error {
-    AddrParse(net::AddrParseError),
-    CLI(clap::Error),
-    IO(io::Error),
-    Parse(glop::grammar::ParseError),
-    Env(env::VarError),
-}
-
-impl From<clap::Error> for Error {
-    fn from(err: clap::Error) -> Error {
-        Error::CLI(err)
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(err: io::Error) -> Error {
-        Error::IO(err)
-    }
-}
-
-impl From<net::AddrParseError> for Error {
-    fn from(err: net::AddrParseError) -> Error {
-        Error::AddrParse(err)
-    }
-}
-
-impl From<env::VarError> for Error {
-    fn from(err: env::VarError) -> Error {
-        Error::Env(err)
-    }
-}
-
-impl From<glop::grammar::ParseError> for Error {
-    fn from(err: glop::grammar::ParseError) -> Error {
-        Error::Parse(err)
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            Error::AddrParse(ref err) => write!(f, "{}", err),
-            Error::CLI(ref err) => write!(f, "{}", err),
-            Error::Env(ref err) => write!(f, "{}", err),
-            Error::IO(ref err) => write!(f, "{}", err),
-            Error::Parse(ref err) => write!(f, "{}", err),
-        }
-    }
-}
 
 fn main() {
     let app = App::new("glop")
@@ -161,7 +107,7 @@ fn cmd_agent<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
 }
 
 fn cmd_getvar<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
-    let addr_str = env::var("ADDR").map_err(Error::Env)?;
+    let addr_str = std::env::var("ADDR").map_err(Error::Env)?;
     let addr = addr_str.parse().map_err(Error::AddrParse)?;
     let cmd = format!("getvar {}", app_m.value_of("KEY").unwrap());
     let mut core = Core::new()?;
@@ -182,8 +128,8 @@ fn cmd_getvar<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
             match values.nth(1) {
                 Some(v) => v.to_string(),
                 None => {
-                    return Err(Error::IO(io::Error::new(io::ErrorKind::Other,
-                                                        "getvar: malformed response")));
+                    return Err(Error::IO(std::io::Error::new(std::io::ErrorKind::Other,
+                                                             "getvar: malformed response")));
                 }
             }
         }
@@ -196,7 +142,7 @@ fn cmd_getvar<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
 }
 
 fn cmd_setvar<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
-    let addr_str = env::var("ADDR").map_err(Error::Env)?;
+    let addr_str = std::env::var("ADDR").map_err(Error::Env)?;
     let addr = addr_str.parse().map_err(Error::AddrParse)?;
     let cmd = format!("setvar {} {}",
                       app_m.value_of("KEY").unwrap(),
@@ -222,7 +168,7 @@ fn cmd_setvar<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
 }
 
 fn cmd_getmsg<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
-    let addr_str = env::var("ADDR").map_err(Error::Env)?;
+    let addr_str = std::env::var("ADDR").map_err(Error::Env)?;
     let addr = addr_str.parse().map_err(Error::AddrParse)?;
     let cmd = format!("getmsg {} {}",
                       app_m.value_of("TOPIC").unwrap(),
@@ -245,8 +191,8 @@ fn cmd_getmsg<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
             match values.nth(1) {
                 Some(v) => v.to_string(),
                 None => {
-                    return Err(Error::IO(io::Error::new(io::ErrorKind::Other,
-                                                        "getmsg: malformed response")));
+                    return Err(Error::IO(std::io::Error::new(std::io::ErrorKind::Other,
+                                                             "getmsg: malformed response")));
                 }
             }
         }

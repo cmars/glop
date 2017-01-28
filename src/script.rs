@@ -9,21 +9,21 @@ use self::tokio_core::io::{Codec, EasyBuf};
 
 pub struct ServiceCodec;
 
-pub enum ScriptRequest {
+pub enum Request {
     GetVar(String),
     SetVar(String, String),
     GetMsg(String, String),
 }
 
-pub enum ScriptResponse {
+pub enum Response {
     GetVar(String, String),
     SetVar(String, String),
     GetMsg(String, String, String),
 }
 
 impl Codec for ServiceCodec {
-    type In = ScriptRequest;
-    type Out = ScriptResponse;
+    type In = Request;
+    type Out = Response;
 
     fn decode(&mut self, buf: &mut EasyBuf) -> io::Result<Option<Self::In>> {
         if let Some(i) = buf.as_slice().iter().position(|&b| b == b'\n') {
@@ -43,7 +43,7 @@ impl Codec for ServiceCodec {
                     if fields.len() < 2 {
                         Err(io::Error::new(io::ErrorKind::Other, "getvar: missing key"))
                     } else {
-                        Ok(Some(ScriptRequest::GetVar(fields[1].to_string())))
+                        Ok(Some(Request::GetVar(fields[1].to_string())))
                     }
                 }
                 "setvar" => {
@@ -51,8 +51,8 @@ impl Codec for ServiceCodec {
                         Err(io::Error::new(io::ErrorKind::Other,
                                            "setvar: missing key and/or value"))
                     } else {
-                        Ok(Some(ScriptRequest::SetVar(fields[1].to_string(),
-                                                      fields[2..].join(" ").to_string())))
+                        Ok(Some(Request::SetVar(fields[1].to_string(),
+                                                fields[2..].join(" ").to_string())))
                     }
                 }
                 "getmsg" => {
@@ -60,8 +60,7 @@ impl Codec for ServiceCodec {
                         Err(io::Error::new(io::ErrorKind::Other,
                                            "getmsg: missing topic and/or key"))
                     } else {
-                        Ok(Some(ScriptRequest::GetMsg(fields[1].to_string(),
-                                                      fields[2].to_string())))
+                        Ok(Some(Request::GetMsg(fields[1].to_string(), fields[2].to_string())))
                     }
                 }
                 _ => {
@@ -76,14 +75,14 @@ impl Codec for ServiceCodec {
 
     fn encode(&mut self, msg: Self::Out, buf: &mut Vec<u8>) -> io::Result<()> {
         match msg {
-            ScriptResponse::GetVar(ref k, ref v) => {
+            Response::GetVar(ref k, ref v) => {
                 // TODO: use json or something
                 buf.write_fmt(format_args!("getvar {} -> {}", k, v))?;
             }
-            ScriptResponse::SetVar(ref k, ref v) => {
+            Response::SetVar(ref k, ref v) => {
                 buf.write_fmt(format_args!("setvar {} {}", k, v))?;
             }
-            ScriptResponse::GetMsg(ref topic, ref k, ref v) => {
+            Response::GetMsg(ref topic, ref k, ref v) => {
                 buf.write_fmt(format_args!("getmsg {} {} -> {}", topic, k, v))?;
             }
         }

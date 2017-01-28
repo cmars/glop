@@ -5,16 +5,12 @@ extern crate tokio_proto;
 extern crate tokio_process;
 extern crate tokio_service;
 
+use std;
 use std::collections::{HashMap, HashSet};
-use std::env;
-use std::error;
-use std::fmt;
 use std::fs::OpenOptions;
-use std::io;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::process::Command;
-use std::string;
 use std::sync::{Arc, Mutex};
 
 use self::futures::{future, Future, BoxFuture, Sink, Stream};
@@ -23,8 +19,9 @@ use self::tokio_process::CommandExt;
 use self::tokio_service::Service;
 
 use super::ast;
-use super::cleanup::Cleanup;
-use super::script::{ScriptRequest, ScriptResponse, ServiceCodec};
+use super::error;
+use super::cleanup;
+use super::script;
 use super::value::{Value, Identifier, Obj};
 
 pub type Msg = Obj;
@@ -62,58 +59,46 @@ impl Match {
     }
 }
 
-type StatefulResult<T> = Result<T, StatefulError>;
+type RuntimeResult<T> = Result<T, Error>;
 
 #[derive(Debug)]
-pub enum StatefulError {
-    IO(io::Error),
+pub enum Error {
+    Base(error::Error),
     Exec(i32, String),
     Acknowledge(String),
-    StringConversion(string::FromUtf8Error),
     UnsupportedAction,
 }
 
-impl From<io::Error> for StatefulError {
-    fn from(err: io::Error) -> StatefulError {
-        StatefulError::IO(err)
+impl From<error::Error> for Error {
+    fn from(err: error::Error) -> Error {
+        Error::Base(err)
     }
 }
 
-impl From<string::FromUtf8Error> for StatefulError {
-    fn from(err: string::FromUtf8Error) -> StatefulError {
-        StatefulError::StringConversion(err)
-    }
-}
-
-impl fmt::Display for StatefulError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match *self {
-            StatefulError::IO(ref err) => write!(f, "Script file error: {}", err),
-            StatefulError::Exec(code, ref stderr) => {
-                write!(f, "Script exit code {}: {}", code, stderr)
-            }
-            StatefulError::Acknowledge(ref topic) => write!(f, "Invalid acknowledge: {}", topic),
-            StatefulError::StringConversion(ref err) => write!(f, "{}", err),
-            StatefulError::UnsupportedAction => write!(f, "unsupported action"),
+            Error::Base(ref err) => write!(f, "{}", err),
+            Error::Exec(code, ref stderr) => write!(f, "script exit code {}: {}", code, stderr),
+            Error::Acknowledge(ref topic) => write!(f, "invalid acknowledge: {}", topic),
+            Error::UnsupportedAction => write!(f, "unsupported action"),
         }
     }
 }
 
-impl error::Error for StatefulError {
+impl std::error::Error for Error {
     fn description(&self) -> &str {
         match *self {
-            StatefulError::IO(ref err) => err.description(),
-            StatefulError::Exec(_, ref stderr) => stderr,
-            StatefulError::Acknowledge(ref topic) => topic,
-            StatefulError::StringConversion(ref err) => err.description(),
-            StatefulError::UnsupportedAction => "unsupported action",
+            Error::Base(ref err) => err.description(),
+            Error::Exec(_, ref stderr) => stderr,
+            Error::Acknowledge(ref topic) => topic,
+            Error::UnsupportedAction => "unsupported action",
         }
     }
 
-    fn cause(&self) -> Option<&error::Error> {
+    fn cause(&self) -> Option<&std::error::Error> {
         match *self {
-            StatefulError::IO(ref err) => Some(err),
-            StatefulError::StringConversion(ref err) => Some(err),
+            Error::Base(ref err) => Some(err),
             _ => None,
         }
     }
@@ -126,7 +111,7 @@ pub trait Stateful {
 
     fn unset_var(&mut self, key: &Identifier);
 
-    fn ack_msg(&mut self, topic: &str) -> StatefulResult<()>;
+    fn ack_msg(&mut self, topic: &str) -> RuntimeResult<()>;
 }
 
 pub struct Context {
@@ -178,14 +163,14 @@ impl<'a> Transaction<'a> {
         }
     }
 
-    pub fn apply(&mut self, m: &Match) -> StatefulResult<()> {
+    pub fn apply(&mut self, m: &Match) -> RuntimeResult<()> {
         for action in &m.actions {
             try!(self.apply_action(&action));
         }
         self.commit()
     }
 
-    fn commit(&mut self) -> StatefulResult<()> {
+    fn commit(&mut self) -> RuntimeResult<()> {
         for action in &self.applied {
             try!(self.st.apply_action(action));
         }
@@ -207,14 +192,14 @@ impl<'a> Transaction<'a> {
         }
     }
 
-    pub fn with_context<F>(&mut self, f: F) -> StatefulResult<()>
-        where F: Fn(&mut Context) -> StatefulResult<()>
+    pub fn with_context<F>(&mut self, f: F) -> RuntimeResult<()>
+        where F: Fn(&mut Context) -> RuntimeResult<()>
     {
         let mut ctx = self.ctx.lock().unwrap();
         f(&mut ctx)
     }
 
-    fn apply_action(&mut self, action: &Action) -> StatefulResult<()> {
+    fn apply_action(&mut self, action: &Action) -> RuntimeResult<()> {
         let mut actions = match action {
             &Action::SetVar(ref k, ref v) => {
                 let mut ctx = self.ctx.lock().unwrap();
@@ -237,16 +222,22 @@ impl<'a> Transaction<'a> {
         Ok(())
     }
 
-    fn exec_script(&mut self, contents: &str) -> StatefulResult<Vec<Action>> {
-        let mut script_path_buf = env::temp_dir();
+    fn exec_script(&mut self, contents: &str) -> RuntimeResult<Vec<Action>> {
+        let mut script_path_buf = std::env::temp_dir();
         let script_path_base = textnonce::TextNonce::sized_urlsafe(32).unwrap().into_string();
         script_path_buf.push(&script_path_base);
         let script_path = script_path_buf.to_str().unwrap();
-        let cleanup = Cleanup::File(script_path.to_string());
+        let cleanup = cleanup::Cleanup::File(script_path.to_string());
         {
-            let mut script_file =
-                OpenOptions::new().write(true).mode(0o700).create_new(true).open(script_path)?;
-            script_file.write_all(contents.as_bytes()).map_err(StatefulError::IO)?;
+            let mut script_file = OpenOptions::new().write(true)
+                .mode(0o700)
+                .create_new(true)
+                .open(script_path)
+                .map_err(error::Error::IO)
+                .map_err(Error::Base)?;
+            script_file.write_all(contents.as_bytes())
+                .map_err(error::Error::IO)
+                .map_err(Error::Base)?;
         }
 
         let actions = run_script(self.ctx.clone(), script_path)?;
@@ -268,10 +259,10 @@ impl Stateful for Context {
         key.unset(&mut self.vars)
     }
 
-    fn ack_msg(&mut self, topic: &str) -> StatefulResult<()> {
+    fn ack_msg(&mut self, topic: &str) -> RuntimeResult<()> {
         match self.msgs.remove(topic) {
             Some(_) => Ok(()),
-            None => Err(StatefulError::Acknowledge(topic.to_string())),
+            None => Err(Error::Acknowledge(topic.to_string())),
         }
     }
 }
@@ -292,11 +283,11 @@ impl ScriptService {
 
 impl Service for ScriptService {
     // These types must match the corresponding protocol types:
-    type Request = ScriptRequest;
-    type Response = ScriptResponse;
+    type Request = script::Request;
+    type Response = script::Response;
 
     // For non-streaming protocols, service errors are always io::Error
-    type Error = io::Error;
+    type Error = std::io::Error;
 
     // The future for computing the response; box it for simplicity.
     type Future = BoxFuture<Self::Response, Self::Error>;
@@ -305,28 +296,28 @@ impl Service for ScriptService {
     fn call(&self, req: Self::Request) -> Self::Future {
         let mut ctx = self.ctx.lock().unwrap();
         let res = match req {
-            ScriptRequest::GetVar(ref k) => {
+            script::Request::GetVar(ref k) => {
                 match ctx.get_var(&Identifier::from_str(k)) {
-                    Some(ref v) => ScriptResponse::GetVar(k.to_string(), v.to_string()),
-                    None => ScriptResponse::GetVar(k.to_string(), "".to_string()),
+                    Some(ref v) => script::Response::GetVar(k.to_string(), v.to_string()),
+                    None => script::Response::GetVar(k.to_string(), "".to_string()),
                 }
             }
-            ScriptRequest::SetVar(ref k, ref v) => {
+            script::Request::SetVar(ref k, ref v) => {
                 let id = Identifier::from_str(k);
                 ctx.set_var(&id, Value::from_str(v));
                 drop(ctx);
                 let mut actions = self.actions.lock().unwrap();
                 actions.push(Action::SetVar(id, v.to_string()));
                 drop(actions);
-                ScriptResponse::SetVar(k.to_string(), v.to_string())
+                script::Response::SetVar(k.to_string(), v.to_string())
             }
-            ScriptRequest::GetMsg(ref topic, ref k) => {
+            script::Request::GetMsg(ref topic, ref k) => {
                 match ctx.get_msg(topic, &Identifier::from_str(k)) {
                     Some(ref v) => {
-                        ScriptResponse::GetMsg(topic.to_string(), k.to_string(), v.to_string())
+                        script::Response::GetMsg(topic.to_string(), k.to_string(), v.to_string())
                     }
                     None => {
-                        ScriptResponse::GetMsg(topic.to_string(), k.to_string(), "".to_string())
+                        script::Response::GetMsg(topic.to_string(), k.to_string(), "".to_string())
                     }
                 }
             }
@@ -335,13 +326,17 @@ impl Service for ScriptService {
     }
 }
 
-fn run_script(ctx: Arc<Mutex<Context>>, script_path: &str) -> Result<Vec<Action>, StatefulError> {
-    let mut core = tokio_core::reactor::Core::new()?;
+fn run_script(ctx: Arc<Mutex<Context>>, script_path: &str) -> Result<Vec<Action>, Error> {
+    let mut core = tokio_core::reactor::Core::new().map_err(error::Error::IO)
+        .map_err(Error::Base)?;
     let handle = core.handle();
 
     let addr = "127.0.0.1:0".parse().unwrap();
-    let listener = tokio_core::net::TcpListener::bind(&addr, &handle)?;
-    let listen_addr = &listener.local_addr()?;
+    let listener = tokio_core::net::TcpListener::bind(&addr, &handle).map_err(error::Error::IO)
+        .map_err(Error::Base)?;
+    let listen_addr = &listener.local_addr()
+        .map_err(error::Error::IO)
+        .map_err(Error::Base)?;
     let connections = listener.incoming();
     let mut cmd = &mut Command::new(script_path);
     {
@@ -363,21 +358,22 @@ fn run_script(ctx: Arc<Mutex<Context>>, script_path: &str) -> Result<Vec<Action>
                             None => 0,
                         };
                         let stderr = String::from_utf8(output.stderr).unwrap();
-                        Err(StatefulError::Exec(code, stderr))
+                        Err(Error::Exec(code, stderr))
                     }
                 }
-                Err(e) => Err(StatefulError::IO(e)),
+                Err(e) => Err(Error::Base(error::Error::IO(e))),
             }
         });
     let server = connections.for_each(move |(socket, _peer_addr)| {
-            let (wr, rd) = socket.framed(ServiceCodec).split();
+            let (wr, rd) = socket.framed(script::ServiceCodec).split();
             let service = ScriptService::new(ctx.clone(), server_actions.clone());
             let responses = rd.and_then(move |req| service.call(req));
             let responder = wr.send_all(responses).then(|_| Ok(()));
             handle.spawn(responder);
             Ok(())
         })
-        .map_err(StatefulError::IO);
+        .map_err(error::Error::IO)
+        .map_err(Error::Base);
     let comb = server.select(child);
     match core.run(comb) {
         Err((e, _)) => {
@@ -523,7 +519,7 @@ impl State {
         Some(txn)
     }
 
-    fn apply_action(&mut self, action: &Action) -> StatefulResult<()> {
+    fn apply_action(&mut self, action: &Action) -> RuntimeResult<()> {
         match action {
             &Action::SetVar(ref k, ref v) => {
                 self.set_var(k, Value::Str(v.to_string()));
@@ -534,7 +530,7 @@ impl State {
                 Ok(())
             }
             &Action::Acknowledge(ref k) => self.ack_msg(k),
-            _ => Err(StatefulError::UnsupportedAction),
+            _ => Err(Error::UnsupportedAction),
         }
     }
 }
@@ -552,13 +548,13 @@ impl Stateful for State {
         key.unset(&mut self.vars)
     }
 
-    fn ack_msg(&mut self, topic: &str) -> StatefulResult<()> {
+    fn ack_msg(&mut self, topic: &str) -> RuntimeResult<()> {
         match self.pending_msgs.get_mut(topic) {
             Some(v) => {
                 v.pop();
                 Ok(())
             }
-            None => Err(StatefulError::Acknowledge(topic.to_string())),
+            None => Err(Error::Acknowledge(topic.to_string())),
         }
     }
 }
