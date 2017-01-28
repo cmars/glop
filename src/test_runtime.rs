@@ -36,7 +36,7 @@ fn matched_init_message() {
     let mut st = runtime::State::new();
     st.push_msg("init", runtime::Msg::new());
     let m_exc = runtime::Match::new_from_ast(&m_ast);
-    match st.eval(&m_exc) {
+    let actions = match st.eval(&m_exc) {
         Some(ref mut txn) => {
             assert_eq!(txn.seq, 0);
             assert!(txn.with_context(|ref mut ctx| {
@@ -45,10 +45,11 @@ fn matched_init_message() {
                     Ok(())
                 })
                 .is_ok());
-            assert!(txn.apply(&m_exc).is_ok());
+            txn.apply(&m_exc).unwrap()
         }
         None => panic!("expected match"),
-    }
+    };
+    assert!(st.commit(&actions).is_ok());
     match st.eval(&m_exc) {
         Some(_) => panic!("unexpected match"),
         None => {}
@@ -66,7 +67,7 @@ fn matched_only_init_message() {
                     .cloned()
                     .collect());
     let m_exc = runtime::Match::new_from_ast(&m_ast);
-    match st.eval(&m_exc) {
+    let actions = match st.eval(&m_exc) {
         Some(ref mut txn) => {
             assert_eq!(txn.seq, 0);
             assert!(txn.with_context(|ref mut ctx| {
@@ -75,10 +76,11 @@ fn matched_only_init_message() {
                     Ok(())
                 })
                 .is_ok());
-            assert!(txn.apply(&m_exc).is_ok());
+            txn.apply(&m_exc).unwrap()
         }
         None => panic!("expected match"),
-    }
+    };
+    assert!(st.commit(&actions).is_ok());
     match st.eval(&m_exc) {
         Some(_) => panic!("unexpected match"),
         None => {}
@@ -95,7 +97,7 @@ fn matched_two_messages() {
     st.push_msg("bar", runtime::Msg::new());
     let m_exc = runtime::Match::new_from_ast(&m_ast);
     for i in 0..2 {
-        match st.eval(&m_exc) {
+        let actions = match st.eval(&m_exc) {
             Some(ref mut txn) => {
                 assert_eq!(txn.seq, i);
                 assert!(txn.with_context(|ref mut ctx| {
@@ -105,10 +107,11 @@ fn matched_two_messages() {
                         Ok(())
                     })
                     .is_ok());
-                assert!(txn.apply(&m_exc).is_ok());
+                txn.apply(&m_exc).unwrap()
             }
             None => panic!("expected match"),
-        }
+        };
+        assert!(st.commit(&actions).is_ok());
     }
     match st.eval(&m_exc) {
         Some(_) => panic!("unexpected match"),
@@ -123,13 +126,14 @@ fn match_equal() {
         let mut st = runtime::State::new();
         st.set_var(&Identifier::from_str("foo"), Value::from_str("bar"));
         let m_exc = runtime::Match::new_from_ast(&m_ast);
-        match st.eval(&m_exc) {
+        let actions = match st.eval(&m_exc) {
             Some(ref mut txn) => {
                 assert_eq!(txn.seq, 0);
-                assert!(txn.apply(&m_exc).is_ok());
+                txn.apply(&m_exc).unwrap()
             }
             None => panic!("expected match"),
-        }
+        };
+        assert!(st.commit(&actions).is_ok());
         // foo is now unset
         match st.eval(&m_exc) {
             Some(_) => panic!("unexpected match"),
@@ -179,26 +183,28 @@ fn simple_commit_progression() {
     let mut st = runtime::State::new();
     st.set_var(&Identifier::from_str("foo"), Value::from_str("blah"));
     // foo starts out != bar so we expect a match and apply
-    match st.eval(&m_exc_ne) {
+    let actions = match st.eval(&m_exc_ne) {
         Some(ref mut txn) => {
             assert_eq!(txn.seq, 0);
-            assert!(txn.apply(&m_exc_ne).is_ok());
+            txn.apply(&m_exc_ne).unwrap()
         }
         None => panic!("expected match"),
-    }
+    };
+    assert!(st.commit(&actions).is_ok());
     // above match sets foo == bar so m_exc_ne no longer matches
     match st.eval(&m_exc_ne) {
         Some(_) => panic!("unexpected match"),
         None => {}
     }
     // now let's match on foo == bar, should match committed state now
-    match st.eval(&m_exc_eq) {
+    let actions = match st.eval(&m_exc_eq) {
         Some(ref mut txn) => {
             assert_eq!(txn.seq, 1);
-            assert!(txn.apply(&m_exc_eq).is_ok());
+            txn.apply(&m_exc_eq).unwrap()
         }
         None => panic!("expected match"),
-    }
+    };
+    assert!(st.commit(&actions).is_ok());
 }
 
 #[test]
@@ -208,13 +214,14 @@ fn match_is_set() {
         let mut st = runtime::State::new();
         st.set_var(&Identifier::from_str("foo"), Value::from_str("bar"));
         let m_exc = runtime::Match::new_from_ast(&m_ast);
-        match st.eval(&m_exc) {
+        let actions = match st.eval(&m_exc) {
             Some(ref mut txn) => {
                 assert_eq!(txn.seq, 0);
-                assert!(txn.apply(&m_exc).is_ok());
+                txn.apply(&m_exc).unwrap()
             }
             None => panic!("expected match"),
-        }
+        };
+        assert!(st.commit(&actions).is_ok());
         match st.eval(&m_exc) {
             Some(_) => panic!("unexpected match"),
             None => {}

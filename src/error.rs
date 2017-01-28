@@ -1,22 +1,18 @@
 extern crate clap;
 
 use std;
-use std::env;
-use std::fmt;
-use std::io;
-use std::net;
-use std::string;
 
 use super::grammar;
 
 #[derive(Debug)]
 pub enum Error {
-    AddrParse(net::AddrParseError),
+    AddrParse(std::net::AddrParseError),
     CLI(clap::Error),
-    Env(env::VarError),
-    IO(io::Error),
+    Env(std::env::VarError),
+    IO(std::io::Error),
     Parse(grammar::ParseError),
-    StringConversion(string::FromUtf8Error),
+    StringConversion(std::string::FromUtf8Error),
+    InvalidArgument(String),
 }
 
 impl From<clap::Error> for Error {
@@ -25,20 +21,20 @@ impl From<clap::Error> for Error {
     }
 }
 
-impl From<io::Error> for Error {
-    fn from(err: io::Error) -> Error {
+impl From<std::io::Error> for Error {
+    fn from(err: std::io::Error) -> Error {
         Error::IO(err)
     }
 }
 
-impl From<net::AddrParseError> for Error {
-    fn from(err: net::AddrParseError) -> Error {
+impl From<std::net::AddrParseError> for Error {
+    fn from(err: std::net::AddrParseError) -> Error {
         Error::AddrParse(err)
     }
 }
 
-impl From<env::VarError> for Error {
-    fn from(err: env::VarError) -> Error {
+impl From<std::env::VarError> for Error {
+    fn from(err: std::env::VarError) -> Error {
         Error::Env(err)
     }
 }
@@ -49,14 +45,14 @@ impl From<grammar::ParseError> for Error {
     }
 }
 
-impl From<string::FromUtf8Error> for Error {
-    fn from(err: string::FromUtf8Error) -> Error {
+impl From<std::string::FromUtf8Error> for Error {
+    fn from(err: std::string::FromUtf8Error) -> Error {
         Error::StringConversion(err)
     }
 }
 
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match *self {
             Error::AddrParse(ref err) => err.fmt(f),
             Error::CLI(ref err) => err.fmt(f),
@@ -64,6 +60,7 @@ impl fmt::Display for Error {
             Error::IO(ref err) => err.fmt(f),
             Error::Parse(ref err) => err.fmt(f),
             Error::StringConversion(ref err) => err.fmt(f),
+            Error::InvalidArgument(ref msg) => write!(f, "invalid argument: {}", msg),
         }
     }
 }
@@ -77,6 +74,7 @@ impl std::error::Error for Error {
             Error::IO(ref err) => err.description(),
             Error::Parse(ref err) => err.description(),
             Error::StringConversion(ref err) => err.description(),
+            Error::InvalidArgument(ref msg) => msg,
         }
     }
 
@@ -88,6 +86,7 @@ impl std::error::Error for Error {
             Error::IO(ref err) => Some(err),
             Error::Parse(ref err) => Some(err),
             Error::StringConversion(ref err) => Some(err),
+            _ => None,
         }
     }
 }

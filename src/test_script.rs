@@ -157,7 +157,7 @@ fn simple_script_err() {
                 })
                 .is_ok());
             match txn.apply(&m_exc) {
-                Ok(()) => panic!("expected script to error"),
+                Ok(_) => panic!("expected script to error"),
                 Err(e) => {
                     match e {
                         runtime::Error::Exec(rc, ref stderr) => {
@@ -210,7 +210,7 @@ fn hello_script_server() {
     let mut st = runtime::State::new();
     st.push_msg("init", runtime::Msg::new());
     let m_exc = runtime::Match::new_from_ast(&m_ast);
-    match st.eval(&m_exc) {
+    let actions = match st.eval(&m_exc) {
         Some(ref mut txn) => {
             assert_eq!(txn.seq, 0);
             assert!(txn.with_context(|ref mut ctx| {
@@ -219,10 +219,11 @@ fn hello_script_server() {
                     Ok(())
                 })
                 .is_ok());
-            assert!(txn.apply(&m_exc).is_ok());
+            txn.apply(&m_exc).unwrap()
         }
         None => panic!("expected match"),
-    }
+    };
+    assert!(st.commit(&actions).is_ok());
     assert_eq!(st.get_var(&Identifier::from_str("foo")),
                Some(&Value::from_str("hello-bar")));
 }
@@ -239,12 +240,11 @@ fn script_server_access_msg() {
                     .cloned()
                     .collect());
     let m_exc = runtime::Match::new_from_ast(&m_ast);
-    match st.eval(&m_exc) {
-        Some(ref mut txn) => {
-            assert!(txn.apply(&m_exc).is_ok());
-        }
+    let actions = match st.eval(&m_exc) {
+        Some(ref mut txn) => txn.apply(&m_exc).unwrap(),
         None => panic!("expected match"),
-    }
+    };
+    assert!(st.commit(&actions).is_ok());
     assert_eq!(st.get_var(&Identifier::from_str("all")),
                Some(&Value::from_str("good")));
 }

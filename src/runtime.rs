@@ -146,11 +146,11 @@ impl Context {
     }
 }
 
-pub struct Transaction<'b> {
+pub struct Transaction<'a> {
     pub seq: i32,
     pub ctx: Arc<Mutex<Context>>,
     pub applied: Vec<Action>,
-    pub st: &'b mut State,
+    pub st: &'a mut State,
 }
 
 impl<'a> Transaction<'a> {
@@ -163,19 +163,11 @@ impl<'a> Transaction<'a> {
         }
     }
 
-    pub fn apply(&mut self, m: &Match) -> RuntimeResult<()> {
+    pub fn apply(&mut self, m: &Match) -> RuntimeResult<Vec<Action>> {
         for action in &m.actions {
-            try!(self.apply_action(&action));
+            self.apply_action(&action)?;
         }
-        self.commit()
-    }
-
-    fn commit(&mut self) -> RuntimeResult<()> {
-        for action in &self.applied {
-            try!(self.st.apply_action(action));
-        }
-        self.st.next_seq();
-        Ok(())
+        Ok(self.applied.clone())
     }
 
     fn eval(&self, cond: &Condition) -> bool {
@@ -487,11 +479,6 @@ impl State {
         self.pending_msgs.insert(topic.to_string(), vec![msg]);
     }
 
-    fn next_seq(&mut self) -> i32 {
-        self.seq += 1;
-        self.seq
-    }
-
     fn next_messages(&self, topics: &HashSet<String>) -> HashMap<String, Msg> {
         let mut next: HashMap<String, Msg> = HashMap::new();
         for (k, v) in &self.pending_msgs {
@@ -517,6 +504,15 @@ impl State {
             return None;
         }
         Some(txn)
+    }
+
+    pub fn commit(&mut self, actions: &Vec<Action>) -> RuntimeResult<i32> {
+        for action in actions {
+            self.apply_action(action)?;
+        }
+        let result = self.seq;
+        self.seq += 1;
+        Ok(result)
     }
 
     fn apply_action(&mut self, action: &Action) -> RuntimeResult<()> {
