@@ -456,7 +456,7 @@ impl Clone for Action {
 pub struct State {
     seq: i32,
     vars: HashMap<String, Value>,
-    pending_msgs: HashMap<String, Vec<Msg>>,
+    inbox: HashMap<String, Vec<Msg>>,
 }
 
 impl State {
@@ -464,24 +464,24 @@ impl State {
         State {
             seq: 0,
             vars: HashMap::new(),
-            pending_msgs: HashMap::new(),
+            inbox: HashMap::new(),
         }
     }
 
     pub fn push_msg(&mut self, topic: &str, msg: Msg) {
-        match self.pending_msgs.get_mut(topic) {
+        match self.inbox.get_mut(topic) {
             Some(v) => {
                 v.push(msg);
                 return;
             }
             _ => {}
         }
-        self.pending_msgs.insert(topic.to_string(), vec![msg]);
+        self.inbox.insert(topic.to_string(), vec![msg]);
     }
 
     fn next_messages(&self, topics: &HashSet<String>) -> HashMap<String, Msg> {
         let mut next: HashMap<String, Msg> = HashMap::new();
-        for (k, v) in &self.pending_msgs {
+        for (k, v) in &self.inbox {
             if !topics.contains(k) {
                 continue;
             }
@@ -545,7 +545,7 @@ impl Stateful for State {
     }
 
     fn ack_msg(&mut self, topic: &str) -> RuntimeResult<()> {
-        match self.pending_msgs.get_mut(topic) {
+        match self.inbox.get_mut(topic) {
             Some(v) => {
                 v.pop();
                 Ok(())
