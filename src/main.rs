@@ -16,6 +16,7 @@ use tokio_core::reactor::Core;
 extern crate glop;
 use glop::grammar;
 use glop::runtime;
+use glop::agent;
 use glop::error::Error;
 
 type AppResult<T> = Result<T, Error>;
@@ -25,8 +26,9 @@ fn main() {
         .version("0")
         .author("Casey Marshall")
         .about("Glue Language for OPerations")
-        .subcommand(SubCommand::with_name("agent")
-            .about("run the interpreter agent")
+        .subcommand(SubCommand::with_name("agent").about("run the agent server"))
+        .subcommand(SubCommand::with_name("run")
+            .about("run the interpreter")
             .arg(Arg::with_name("GLOPFILE").index(1).multiple(true).required(true)))
         .subcommand(SubCommand::with_name("getvar")
             .about("get variable in context")
@@ -47,6 +49,7 @@ fn main() {
     let app_m = app.get_matches();
     let result = match app_m.subcommand_name() {
         Some("agent") => cmd_agent(app_m.subcommand_matches("agent").unwrap()),
+        Some("run") => cmd_run(app_m.subcommand_matches("run").unwrap()),
         Some("getvar") => cmd_getvar(app_m.subcommand_matches("getvar").unwrap()),
         Some("setvar") => cmd_setvar(app_m.subcommand_matches("setvar").unwrap()),
         Some("getmsg") => cmd_getmsg(app_m.subcommand_matches("getmsg").unwrap()),
@@ -75,7 +78,12 @@ fn read_file(path: &str) -> AppResult<String> {
     Ok(s)
 }
 
-fn cmd_agent<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
+fn cmd_agent<'a>(_app_m: &ArgMatches<'a>) -> AppResult<()> {
+    agent::run_server().map_err(Error::IO)?;
+    Ok(())
+}
+
+fn cmd_run<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let glop_file = app_m.value_of("GLOPFILE").unwrap();
     let glop_contents = try!(read_file(glop_file));
     let glop = grammar::glop(&glop_contents).map_err(Error::Parse)?;

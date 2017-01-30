@@ -1,6 +1,6 @@
 [package]
 name = "glop"
-version = "0.1.1"
+version = "0.1.2"
 description = "Glue Language for OPerations"
 license = "Apache-2.0"
 authors = ["Casey Marshall <glop@cmars.tech>"]
@@ -13,6 +13,9 @@ peg = { version = "0.4" }
 [dependencies]
 clap = "2.19.3"
 futures = "0.1"
+serde = "0.9"
+serde_derive = "0.9"
+serde_json = "0.9"
 textnonce = "0.4.1"
 tokio-core = "0.1"
 tokio-service = "0.1"

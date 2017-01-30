@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::ast;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Value {
     Int(i32),
     Str(String),
