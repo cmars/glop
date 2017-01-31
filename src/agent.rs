@@ -1,4 +1,5 @@
 extern crate futures;
+extern crate futures_cpupool;
 extern crate serde_json;
 extern crate tokio_core;
 extern crate tokio_service;
@@ -160,6 +161,7 @@ fn read_file(path: &str) -> Result<String, Error> {
 pub struct Service {
     senders: Arc<Mutex<HashMap<String, mpsc::Sender<Envelope>>>>,
     handle: tokio_core::reactor::Handle,
+    pool: futures_cpupool::CpuPool,
 }
 
 impl Service {
@@ -167,6 +169,7 @@ impl Service {
         Service {
             senders: Arc::new(Mutex::new(HashMap::new())),
             handle: h.clone(),
+            pool: futures_cpupool::CpuPool::new_num_cpus(),
         }
     }
 
@@ -178,10 +181,7 @@ impl Service {
                 senders.insert(add_name.clone(), sender);
                 let agent =
                     Agent::new_from_file(add_source, receiver).map_err(runtime::Error::Base)?;
-                self.handle
-                    .clone()
-                    .spawn(agent.for_each(|_| Ok(()))
-                        .then(|_| Ok(())));
+                self.handle.spawn(self.pool.spawn(agent.for_each(|_| Ok(())).then(|_| Ok(()))));
                 Response::Add
             }
             Request::Remove { ref name } => {

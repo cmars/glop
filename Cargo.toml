@@ -13,6 +13,7 @@ peg = { version = "0.4" }
 [dependencies]
 clap = "2.19.3"
 futures = "0.1"
+futures-cpupool = "0.1"
 serde = "0.9"
 serde_derive = "0.9"
 serde_json = "0.9"

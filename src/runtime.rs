@@ -343,6 +343,7 @@ fn run_script(ctx: Arc<Mutex<Context>>, script_path: &str) -> Result<Vec<Action>
             match result {
                 Ok(output) => {
                     if output.status.success() {
+                        print!("stdout: {}", String::from_utf8(output.stdout).unwrap());
                         Ok(())
                     } else {
                         let code = match output.status.code() {

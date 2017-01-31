@@ -14,6 +14,7 @@ pub mod grammar {
 pub mod error;
 pub mod runtime;
 pub mod agent;
+pub mod signal_fix;
 
 mod test_grammar;
 mod test_runtime;

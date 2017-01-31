@@ -17,11 +17,13 @@ extern crate glop;
 use glop::grammar;
 use glop::runtime;
 use glop::agent;
+use glop::signal_fix;
 use glop::error::Error;
 
 type AppResult<T> = Result<T, Error>;
 
 fn main() {
+    let _lock = signal_fix::lock();
     let app = App::new("glop")
         .version("0")
         .author("Casey Marshall")
@@ -95,11 +97,12 @@ fn cmd_run<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     thread::spawn(move || {
         loop {
             for m_exc in &m_excs {
-                match st.eval(&m_exc) {
-                    Some(ref mut ctx) => {
-                        let result = ctx.apply(&m_exc);
-                        tx_result.send(result).unwrap();
-                    }
+                let result = match st.eval(&m_exc) {
+                    Some(ref mut ctx) => Some(ctx.apply(&m_exc).unwrap()),
+                    None => None,
+                };
+                match result {
+                    Some(actions) => tx_result.send(st.commit(&actions)).unwrap(),
                     None => {}
                 }
                 thread::sleep(time::Duration::from_millis(200));
@@ -108,8 +111,11 @@ fn cmd_run<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     });
     loop {
         match rx_result.recv().unwrap() {
-            Ok(_) => println!("Ok"),
-            Err(e) => println!("Err {}", e),
+            Ok(_) => {}
+            Err(e) => {
+                println!("error: {}", e);
+                exit(1);
+            }
         }
     }
 }
