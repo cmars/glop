@@ -69,7 +69,10 @@ fn main() {
     };
     match result {
         Ok(_) => exit(0),
-        Err(_) => exit(1),
+        Err(e) => {
+            println!("{}", e);
+            exit(1)
+        }
     };
 }
 

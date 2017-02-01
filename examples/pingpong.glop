@@ -1,3 +1,5 @@
+// This agent will ping-pong back and forth internally with its variables.
+
 match (message init) {
   set ping true;
 }

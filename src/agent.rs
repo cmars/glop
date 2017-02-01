@@ -62,7 +62,10 @@ impl tokio_core::io::Codec for Codec {
                 serde_json::from_slice(line.as_slice());
             match maybe_req {
                 Ok(req) => Ok(Some(req)),
-                Err(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e.description())),
+                Err(e) => {
+                    println!("decode failed: {}", e);
+                    Err(std::io::Error::new(std::io::ErrorKind::Other, e.description()))
+                }
             }
         } else {
             Ok(None)
@@ -122,7 +125,9 @@ impl Agent {
                     Err(e) => return Err(e),
                 }
             }
-            None => return Ok(futures::Async::NotReady),
+            None => {
+                return Ok(futures::Async::NotReady);
+            }
         };
         // TODO: intelligent selection of next match?
         self.match_index = self.match_index + 1;
@@ -143,10 +148,12 @@ impl futures::stream::Stream for Agent {
         match self.receiver.poll() {
             Ok(futures::Async::Ready(Some(env))) => self.st.push_msg(&env.topic, env.contents),
             Ok(futures::Async::Ready(None)) => return Ok(futures::Async::Ready(None)),
+            Ok(futures::Async::NotReady) => {}
             Err(_) => return Ok(futures::Async::Ready(None)),
-            _ => {}
         }
-        self.poll_matches()
+        let result = self.poll_matches();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        result
     }
 }
 
@@ -181,7 +188,13 @@ impl Service {
                 senders.insert(add_name.clone(), sender);
                 let agent =
                     Agent::new_from_file(add_source, receiver).map_err(runtime::Error::Base)?;
-                self.handle.spawn(self.pool.spawn(agent.for_each(|_| Ok(())).then(|_| Ok(()))));
+                self.handle.spawn(self.pool
+                    .spawn(agent.for_each(|_| Ok(()))
+                        .or_else(|e| {
+                            println!("{}", e);
+                            Err(e)
+                        })
+                        .then(|_| Ok(()))));
                 Response::Add
             }
             Request::Remove { ref name } => {
@@ -239,7 +252,12 @@ pub fn run_server() -> Result<(), std::io::Error> {
         let (wr, rd) = socket.framed(Codec).split();
         let service = service.clone();
         let responses = rd.and_then(move |req| service.call(req));
-        let responder = wr.send_all(responses).then(|_| Ok(()));
+        let responder = wr.send_all(responses)
+            .or_else(|e| {
+                println!("{}", e);
+                Err(e)
+            })
+            .then(|_| Ok(()));
         handle.spawn(responder);
         Ok(())
     });

@@ -1,0 +1,8 @@
+// This agent will echo "pong" to messages of topic "ping".
+
+match (message ping) {
+  script #!/bin/bash
+echo pong
+!#
+  acknowledge ping;
+}
