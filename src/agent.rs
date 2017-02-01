@@ -24,8 +24,6 @@ use super::value::Obj;
 pub enum Request {
     Add { source: String, name: String },
     Remove { name: String },
-    // Start { name: String },
-    // Stop { name: String },
     List,
     SendTo(Envelope), /* RecvFrom { handle: String },
                        * Introduce { names: Vec<String> }, */
@@ -35,8 +33,6 @@ pub enum Request {
 pub enum Response {
     Add,
     Remove,
-    // Start,
-    // Stop,
     List { names: Vec<String> },
     SendTo, /* RecvFrom { topic: String, contents: Obj },
              * Introduce, */
@@ -201,8 +197,6 @@ impl Service {
                 senders.remove(name);
                 Response::Remove
             }
-            // Start { name: String },
-            // Stop { name: String },
             Request::List => Response::List { names: senders.keys().cloned().collect() },
             Request::SendTo(env) => {
                 let sender = match senders.get(&env.dst) {
