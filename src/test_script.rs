@@ -43,14 +43,14 @@ PORT=$(echo ${ADDR} | sed 's/.*://')
 
 # glop getvar foo
 FOO=$(nc 127.0.0.1 ${PORT} <<EOF
-getvar foo
+{"GetVar":{"key":"foo"}}
 EOF)
-[ "$FOO" = "getvar foo -> bar" ]
-FOO=$(echo $FOO | awk '{print $4}')
+echo ${FOO}
+FOO=$(echo ${FOO} | jq -r '.GetVar.value')
 
 # glop setvar foo hello
 nc 127.0.0.1 ${PORT} <<EOF
-setvar foo hello-${FOO}
+{"SetVar":{"key":"foo","value":"hello-${FOO}"}}
 EOF
 
 !#
@@ -65,13 +65,13 @@ PORT=$(echo ${ADDR} | sed 's/.*://')
 
 # glop getmsg init foo
 FOO=$(nc 127.0.0.1 ${PORT} <<EOF
-getmsg init foo
+{"GetMsg":{"topic":"init","key":"foo"}}
 EOF)
-[ "$FOO" = "getmsg init foo -> bar" ]
+[ "$(echo ${FOO} | jq -r '.GetMsg.value')" = "bar" ]
 
 # glop setvar all good
 nc 127.0.0.1 ${PORT} <<EOF
-setvar all good
+{"SetVar":{"key":"all","value":"good"}}
 EOF
 !#
 }

@@ -288,28 +288,49 @@ impl Service for ScriptService {
     fn call(&self, req: Self::Request) -> Self::Future {
         let mut ctx = self.ctx.lock().unwrap();
         let res = match req {
-            script::Request::GetVar(ref k) => {
-                match ctx.get_var(&Identifier::from_str(k)) {
-                    Some(ref v) => script::Response::GetVar(k.to_string(), v.to_string()),
-                    None => script::Response::GetVar(k.to_string(), "".to_string()),
-                }
-            }
-            script::Request::SetVar(ref k, ref v) => {
-                let id = Identifier::from_str(k);
-                ctx.set_var(&id, Value::from_str(v));
-                drop(ctx);
-                let mut actions = self.actions.lock().unwrap();
-                actions.push(Action::SetVar(id, v.to_string()));
-                drop(actions);
-                script::Response::SetVar(k.to_string(), v.to_string())
-            }
-            script::Request::GetMsg(ref topic, ref k) => {
-                match ctx.get_msg(topic, &Identifier::from_str(k)) {
-                    Some(ref v) => {
-                        script::Response::GetMsg(topic.to_string(), k.to_string(), v.to_string())
+            script::Request::GetVar { ref key } => {
+                match ctx.get_var(&Identifier::from_str(key)) {
+                    Some(ref value) => {
+                        script::Response::GetVar {
+                            key: key.to_string(),
+                            value: value.to_string(),
+                        }
                     }
                     None => {
-                        script::Response::GetMsg(topic.to_string(), k.to_string(), "".to_string())
+                        script::Response::GetVar {
+                            key: key.to_string(),
+                            value: "".to_string(),
+                        }
+                    }
+                }
+            }
+            script::Request::SetVar { ref key, ref value } => {
+                let id = Identifier::from_str(key);
+                ctx.set_var(&id, Value::from_str(value));
+                drop(ctx);
+                let mut actions = self.actions.lock().unwrap();
+                actions.push(Action::SetVar(id, value.to_string()));
+                drop(actions);
+                script::Response::SetVar {
+                    key: key.to_string(),
+                    value: value.to_string(),
+                }
+            }
+            script::Request::GetMsg { ref topic, ref key } => {
+                match ctx.get_msg(topic, &Identifier::from_str(key)) {
+                    Some(ref value) => {
+                        script::Response::GetMsg {
+                            topic: topic.to_string(),
+                            key: key.to_string(),
+                            value: value.to_string(),
+                        }
+                    }
+                    None => {
+                        script::Response::GetMsg {
+                            topic: topic.to_string(),
+                            key: key.to_string(),
+                            value: "".to_string(),
+                        }
                     }
                 }
             }

@@ -1,31 +1,37 @@
+extern crate serde_json;
 extern crate tokio_core;
 extern crate tokio_proto;
 
-use std::io;
-use std::io::Write;
-use std::str;
+use std;
+use std::error::Error as StdError;
 
 use self::tokio_core::io::{Codec, EasyBuf};
 
 pub struct ServiceCodec;
 
+#[derive(Serialize, Deserialize)]
 pub enum Request {
-    GetVar(String),
-    SetVar(String, String),
-    GetMsg(String, String),
+    GetVar { key: String },
+    SetVar { key: String, value: String },
+    GetMsg { topic: String, key: String },
 }
 
+#[derive(Serialize, Deserialize)]
 pub enum Response {
-    GetVar(String, String),
-    SetVar(String, String),
-    GetMsg(String, String, String),
+    GetVar { key: String, value: String },
+    SetVar { key: String, value: String },
+    GetMsg {
+        topic: String,
+        key: String,
+        value: String,
+    },
 }
 
 impl Codec for ServiceCodec {
     type In = Request;
     type Out = Response;
 
-    fn decode(&mut self, buf: &mut EasyBuf) -> io::Result<Option<Self::In>> {
+    fn decode(&mut self, buf: &mut EasyBuf) -> std::io::Result<Option<Self::In>> {
         if let Some(i) = buf.as_slice().iter().position(|&b| b == b'\n') {
             // remove the serialized frame from the buffer.
             let line = buf.drain_to(i);
@@ -33,60 +39,26 @@ impl Codec for ServiceCodec {
             // Also remove the '\n'
             buf.drain_to(1);
 
-            let fields = str::from_utf8(&line.as_ref()).unwrap().split(" ").collect::<Vec<&str>>();
-            if fields.len() < 1 {
-                return Err(io::Error::new(io::ErrorKind::Other, "missing command"));
+            // Turn this data into a UTF string and
+            // return it in a Frame.
+            let maybe_req: Result<Self::In, serde_json::error::Error> =
+                serde_json::from_slice(line.as_slice());
+            match maybe_req {
+                Ok(req) => Ok(Some(req)),
+                Err(e) => {
+                    println!("decode failed: {}", e);
+                    Err(std::io::Error::new(std::io::ErrorKind::Other, e.description()))
+                }
             }
-
-            return match fields[0] {
-                "getvar" => {
-                    if fields.len() < 2 {
-                        Err(io::Error::new(io::ErrorKind::Other, "getvar: missing key"))
-                    } else {
-                        Ok(Some(Request::GetVar(fields[1].to_string())))
-                    }
-                }
-                "setvar" => {
-                    if fields.len() < 3 {
-                        Err(io::Error::new(io::ErrorKind::Other,
-                                           "setvar: missing key and/or value"))
-                    } else {
-                        Ok(Some(Request::SetVar(fields[1].to_string(),
-                                                fields[2..].join(" ").to_string())))
-                    }
-                }
-                "getmsg" => {
-                    if fields.len() < 3 {
-                        Err(io::Error::new(io::ErrorKind::Other,
-                                           "getmsg: missing topic and/or key"))
-                    } else {
-                        Ok(Some(Request::GetMsg(fields[1].to_string(), fields[2].to_string())))
-                    }
-                }
-                _ => {
-                    Err(io::Error::new(io::ErrorKind::Other,
-                                       format!("unknown command: {}", fields[0])))
-                }
-            };
         } else {
             Ok(None)
         }
     }
 
-    fn encode(&mut self, msg: Self::Out, buf: &mut Vec<u8>) -> io::Result<()> {
-        match msg {
-            Response::GetVar(ref k, ref v) => {
-                // TODO: use json or something
-                buf.write_fmt(format_args!("getvar {} -> {}", k, v))?;
-            }
-            Response::SetVar(ref k, ref v) => {
-                buf.write_fmt(format_args!("setvar {} {}", k, v))?;
-            }
-            Response::GetMsg(ref topic, ref k, ref v) => {
-                buf.write_fmt(format_args!("getmsg {} {} -> {}", topic, k, v))?;
-            }
+    fn encode(&mut self, msg: Self::Out, buf: &mut Vec<u8>) -> std::io::Result<()> {
+        match serde_json::to_writer(buf, &msg) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e.description())),
         }
-        buf.push(b'\n');
-        Ok(())
     }
 }
