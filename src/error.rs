@@ -13,6 +13,7 @@ pub enum Error {
     Parse(grammar::ParseError),
     StringConversion(std::string::FromUtf8Error),
     InvalidArgument(String),
+    BadResponse,
 }
 
 impl From<clap::Error> for Error {
@@ -61,6 +62,7 @@ impl std::fmt::Display for Error {
             Error::Parse(ref err) => err.fmt(f),
             Error::StringConversion(ref err) => err.fmt(f),
             Error::InvalidArgument(ref msg) => write!(f, "invalid argument: {}", msg),
+            Error::BadResponse => write!(f, "bad response"),
         }
     }
 }
@@ -75,6 +77,7 @@ impl std::error::Error for Error {
             Error::Parse(ref err) => err.description(),
             Error::StringConversion(ref err) => err.description(),
             Error::InvalidArgument(ref msg) => msg,
+            Error::BadResponse => "bad response",
         }
     }
 

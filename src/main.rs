@@ -1,23 +1,27 @@
 extern crate clap;
 extern crate futures;
+extern crate serde_json;
 extern crate tokio_core;
+extern crate tokio_proto;
+extern crate tokio_service;
 
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::process::exit;
-use std::sync::mpsc;
 use std::{thread, time};
 
 use clap::{Arg, ArgMatches, App, SubCommand};
 use futures::future::Future;
-use tokio_core::net::TcpStream;
 use tokio_core::reactor::Core;
+use tokio_proto::TcpClient;
+use tokio_service::Service;
 
 extern crate glop;
 use glop::grammar;
 use glop::runtime;
 use glop::agent;
 use glop::signal_fix;
+use glop::script;
 use glop::error::Error;
 
 type AppResult<T> = Result<T, Error>;
@@ -96,127 +100,89 @@ fn cmd_run<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     st.push_msg("init", runtime::Msg::new());
     let m_excs =
         glop.matches.iter().map(|m_ast| runtime::Match::new_from_ast(&m_ast)).collect::<Vec<_>>();
-    let (tx_result, rx_result) = mpsc::channel();
-    thread::spawn(move || {
-        loop {
-            for m_exc in &m_excs {
-                let result = match st.eval(&m_exc) {
-                    Some(ref mut ctx) => Some(ctx.apply(&m_exc).unwrap()),
-                    None => None,
-                };
-                match result {
-                    Some(actions) => tx_result.send(st.commit(&actions)).unwrap(),
-                    None => {}
-                }
-                thread::sleep(time::Duration::from_millis(200));
-            }
-        }
-    });
     loop {
-        match rx_result.recv().unwrap() {
-            Ok(_) => {}
-            Err(e) => {
-                println!("error: {}", e);
-                exit(1);
+        for m_exc in &m_excs {
+            let result = match st.eval(&m_exc) {
+                Some(ref mut ctx) => {
+                    match ctx.apply(&m_exc) {
+                        Ok(result) => Some(result),
+                        Err(e) => {
+                            println!("{}", e);
+                            None
+                        }
+                    }
+                }
+                None => None,
+            };
+            match result {
+                Some(actions) => {
+                    match st.commit(&actions) {
+                        Ok(_) => {}
+                        Err(e) => println!("{}", e),
+                    }
+                }
+                None => {}
             }
+            thread::sleep(time::Duration::from_millis(200));
         }
     }
 }
 
 fn cmd_getvar<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
+    let core = tokio_core::reactor::Core::new().map_err(Error::IO)?;
+    let handle = core.handle();
     let addr_str = std::env::var("ADDR").map_err(Error::Env)?;
     let addr = addr_str.parse().map_err(Error::AddrParse)?;
-    let cmd = format!("getvar {}", app_m.value_of("KEY").unwrap());
-    let mut core = Core::new()?;
-    let handle = core.handle();
-    let socket = TcpStream::connect(&addr, &handle);
-    let request = socket.and_then(|mut sock| {
-        sock.write_all(cmd.as_bytes())?;
-        Ok(sock)
-    });
-    let response = request.and_then(|mut sock| {
-        let mut s = String::new();
-        sock.read_to_string(&mut s)?;
-        Ok(s)
-    });
-    let value = match core.run(response) {
-        Ok(data) => {
-            let mut values = data.split(" -> ");
-            match values.nth(1) {
-                Some(v) => v.to_string(),
-                None => {
-                    return Err(Error::IO(std::io::Error::new(std::io::ErrorKind::Other,
-                                                             "getvar: malformed response")));
-                }
-            }
+    let req = script::Request::GetVar { key: app_m.value_of("KEY").unwrap().to_string() };
+    let builder = TcpClient::new(script::ClientProto);
+    let resp = builder.connect(&addr, &handle)
+        .and_then(|svc| svc.call(req))
+        .wait()
+        .map_err(Error::IO)?;
+    match resp {
+        script::Response::GetVar { key: _, ref value } => {
+            println!("{}", value);
+            Ok(())
         }
-        Err(e) => {
-            return Err(Error::IO(e));
-        }
-    };
-    println!("{}", value);
-    Ok(())
+        _ => Err(Error::BadResponse),
+    }
 }
 
 fn cmd_setvar<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
-    let addr_str = std::env::var("ADDR").map_err(Error::Env)?;
-    let addr = addr_str.parse().map_err(Error::AddrParse)?;
-    let cmd = format!("setvar {} {}",
-                      app_m.value_of("KEY").unwrap(),
-                      app_m.value_of("VALUE").unwrap());
     let mut core = Core::new()?;
     let handle = core.handle();
-    let socket = TcpStream::connect(&addr, &handle);
-    let request = socket.and_then(|mut sock| {
-        sock.write_all(cmd.as_bytes())?;
-        Ok(sock)
-    });
-    let response = request.and_then(|mut sock| {
-        let mut s = String::new();
-        sock.read_to_string(&mut s)?;
-        Ok(s)
-    });
-    match core.run(response) {
-        Ok(_) => Ok(()),
-        Err(e) => {
-            return Err(Error::IO(e));
-        }
+    let addr_str = std::env::var("ADDR").map_err(Error::Env)?;
+    let addr = addr_str.parse().map_err(Error::AddrParse)?;
+    let req = script::Request::SetVar {
+        key: app_m.value_of("KEY").unwrap().to_string(),
+        value: app_m.value_of("VALUE").unwrap().to_string(),
+    };
+    let builder = TcpClient::new(script::ClientProto);
+    let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
+        .map_err(Error::IO)?;
+    match resp {
+        script::Response::SetVar { key: _, value: _ } => Ok(()),
+        _ => Err(Error::BadResponse),
     }
 }
 
 fn cmd_getmsg<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
+    let core = Core::new()?;
+    let handle = core.handle();
     let addr_str = std::env::var("ADDR").map_err(Error::Env)?;
     let addr = addr_str.parse().map_err(Error::AddrParse)?;
-    let cmd = format!("getmsg {} {}",
-                      app_m.value_of("TOPIC").unwrap(),
-                      app_m.value_of("KEY").unwrap());
-    let mut core = Core::new()?;
-    let handle = core.handle();
-    let socket = TcpStream::connect(&addr, &handle);
-    let request = socket.and_then(|mut sock| {
-        sock.write_all(cmd.as_bytes())?;
-        Ok(sock)
-    });
-    let response = request.and_then(|mut sock| {
-        let mut s = String::new();
-        sock.read_to_string(&mut s)?;
-        Ok(s)
-    });
-    let value = match core.run(response) {
-        Ok(data) => {
-            let mut values = data.split(" -> ");
-            match values.nth(1) {
-                Some(v) => v.to_string(),
-                None => {
-                    return Err(Error::IO(std::io::Error::new(std::io::ErrorKind::Other,
-                                                             "getmsg: malformed response")));
-                }
-            }
-        }
-        Err(e) => {
-            return Err(Error::IO(e));
-        }
+    let req = script::Request::GetMsg {
+        topic: app_m.value_of("TOPIC").unwrap().to_string(),
+        key: app_m.value_of("KEY").unwrap().to_string(),
     };
-    println!("{}", value);
-    Ok(())
+    let builder = TcpClient::new(script::ClientProto);
+    let resp =
+        builder.connect(&addr, &handle).and_then(|svc| svc.call(req)).wait().map_err(Error::IO)?;
+    match resp {
+        script::Response::GetMsg { topic: _, key: _, ref value } => {
+            println!("{}", value);
+            Ok(())
+        }
+        _ => Err(Error::BadResponse),
+    }
 }

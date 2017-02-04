@@ -1,5 +1,6 @@
 // This agent will ping-pong back and forth internally with its variables.
-// Variables are manipulated by the 'set' action keyword.
+// Variables are set by shelling out back to glop from within a script that is
+// executed by glop.
 
 match (message init) {
   set ping true;
@@ -8,15 +9,17 @@ match (message init) {
 match (ping == true) {
   script #!/bin/bash
 echo ping
+export ADDR
+glop setvar ping false
+glop setvar pong true
 !#
-  set ping false;
-  set pong true;
 }
 
 match (pong == true) {
   script #!/bin/bash
 echo pong
+export ADDR
+glop setvar ping true
+glop setvar pong false
 !#
-  set ping true;
-  set pong false;
 }

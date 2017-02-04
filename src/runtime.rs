@@ -136,6 +136,12 @@ impl Context {
                 cmd.env(vec![topic.clone(), k.to_string()].join("__"), v);
             }
         }
+        let path = std::env::var_os("PATH").unwrap_or(std::ffi::OsString::new());
+        let exe_path = std::env::current_exe().unwrap();
+        let exec_dir = std::path::Path::new(&exe_path).parent().unwrap();
+        let mut new_path = std::env::split_paths(&path).collect::<Vec<_>>();
+        new_path.insert(0, exec_dir.to_path_buf());
+        cmd.env("PATH", std::env::join_paths(new_path).unwrap());
     }
 
     fn get_msg<'a>(&'a mut self, topic: &str, key: &Identifier) -> Option<&'a Value> {
@@ -372,6 +378,7 @@ fn run_script(ctx: Arc<Mutex<Context>>, script_path: &str) -> Result<Vec<Action>
                             None => 0,
                         };
                         let stderr = String::from_utf8(output.stderr).unwrap();
+                        print!("stderr: {}", stderr);
                         Err(Error::Exec(code, stderr))
                     }
                 }
