@@ -1,4 +1,6 @@
 # glop
+[![Build Status](https://travis-ci.org/glop-rs/glop.svg?branch=master)](https://travis-ci.org/glop-rs/glop)
+[![Crate](https://img.shields.io/crates/v/glop.svg)](https://crates.io/crates/glop)
 
 glop is a "Glue Language for OPerations", a DSL for building autonomous,
 intelligent agents that operate small, localized software systems.
