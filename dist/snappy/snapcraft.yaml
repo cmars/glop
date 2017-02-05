@@ -1,0 +1,23 @@
+name: glop
+version: '0.1'
+summary: Glue Language for OPerations
+description: |
+  A DSL and interpreted runtime for building autonomous, intelligent agents
+  that operate software systems.
+
+grade: stable
+confinement: strict
+
+apps:
+  glop:
+    command: glop
+    plugs:
+      - network
+      - network-bind
+      - home
+
+parts:
+  glop:
+    plugin: rust
+    rust-channel: stable
+    source: https://github.com/glop-rs/glop.git
