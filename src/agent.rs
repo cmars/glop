@@ -2,20 +2,23 @@ extern crate futures;
 extern crate futures_cpupool;
 extern crate serde_json;
 extern crate tokio_core;
+extern crate tokio_proto;
 extern crate tokio_service;
 
 use std;
 use std::collections::HashMap;
-use std::io::Read;
-use std::sync::{Arc, Mutex};
 use std::error::Error as StdError;
+use std::io::{Read, Write};
+use std::os::unix::fs::OpenOptionsExt;
+use std::sync::{Arc, Mutex};
 
 use self::futures::{Future, Stream, Sink};
 use self::futures::sync::mpsc;
-use self::tokio_core::io::Io;
+use self::tokio_core::io::{Framed, Io};
 use self::tokio_service::Service as TokioService;
 
 use super::error::Error;
+use super::cleanup;
 use super::grammar;
 use super::runtime;
 use super::value::Obj;
@@ -38,9 +41,10 @@ pub enum Response {
              * Introduce, */
 }
 
-pub struct Codec;
+pub struct ClientCodec;
+pub struct ServiceCodec;
 
-impl tokio_core::io::Codec for Codec {
+impl tokio_core::io::Codec for ServiceCodec {
     type In = Request;
     type Out = Response;
 
@@ -72,7 +76,47 @@ impl tokio_core::io::Codec for Codec {
         match serde_json::to_writer(buf, &msg) {
             Ok(_) => Ok(()),
             Err(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e.description())),
+        }?;
+        buf.push(b'\n');
+        Ok(())
+    }
+}
+
+impl tokio_core::io::Codec for ClientCodec {
+    type Out = Request;
+    type In = Response;
+
+    fn decode(&mut self, buf: &mut tokio_core::io::EasyBuf) -> std::io::Result<Option<Self::In>> {
+        if let Some(i) = buf.as_slice().iter().position(|&b| b == b'\n') {
+            // remove the serialized frame from the buffer.
+            let line = buf.drain_to(i);
+
+            // Also remove the '\n'
+            buf.drain_to(1);
+
+            // Turn this data into a UTF string and
+            // return it in a Frame.
+            let maybe_req: Result<Self::In, serde_json::error::Error> =
+                serde_json::from_slice(line.as_slice());
+            match maybe_req {
+                Ok(req) => Ok(Some(req)),
+                Err(e) => {
+                    println!("decode failed: {}", e);
+                    Err(std::io::Error::new(std::io::ErrorKind::Other, e.description()))
+                }
+            }
+        } else {
+            Ok(None)
         }
+    }
+
+    fn encode(&mut self, msg: Self::Out, buf: &mut Vec<u8>) -> std::io::Result<()> {
+        match serde_json::to_writer(buf, &msg) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e.description())),
+        }?;
+        buf.push(b'\n');
+        Ok(())
     }
 }
 
@@ -233,17 +277,30 @@ impl TokioService for Service {
     }
 }
 
+pub struct ClientProto;
+
+impl<T: Io + 'static> tokio_proto::pipeline::ClientProto<T> for ClientProto {
+    type Request = Request;
+    type Response = Response;
+    type Transport = Framed<T, ClientCodec>;
+    type BindTransport = Result<Self::Transport, std::io::Error>;
+
+    fn bind_transport(&self, io: T) -> Self::BindTransport {
+        Ok(io.framed(ClientCodec))
+    }
+}
+
 pub fn run_server() -> Result<(), std::io::Error> {
     let mut core = tokio_core::reactor::Core::new()?;
     let handle = core.handle();
     let addr = "127.0.0.1:0".parse().unwrap();
     let listener = tokio_core::net::TcpListener::bind(&addr, &handle)?;
     let listen_addr = &listener.local_addr()?;
-    println!("{}", listen_addr);
+    let _agent_file_cleanup = write_agent_addr(listen_addr)?;
     let connections = listener.incoming();
     let service = Service::new(&handle);
     let server = connections.for_each(move |(socket, _peer_addr)| {
-        let (wr, rd) = socket.framed(Codec).split();
+        let (wr, rd) = socket.framed(ServiceCodec).split();
         let service = service.clone();
         let responses = rd.and_then(move |req| service.call(req));
         let responder = wr.send_all(responses)
@@ -256,4 +313,41 @@ pub fn run_server() -> Result<(), std::io::Error> {
         Ok(())
     });
     core.run(server)
+}
+
+fn write_agent_addr(addr: &std::net::SocketAddr) -> Result<cleanup::Cleanup, std::io::Error> {
+    let mut agent_path_buf = match std::env::home_dir() {
+        Some(home) => home,
+        None => {
+            return Err(std::io::Error::new(std::io::ErrorKind::Other,
+                                           "cannot determine home directory"))
+        }
+    };
+    agent_path_buf.push(".glop.agent");
+    let agent_path = agent_path_buf.to_str().unwrap();
+    let cleanup = cleanup::Cleanup::File(agent_path.to_string());
+    {
+        let mut agent_file = std::fs::OpenOptions::new().write(true)
+            .mode(0o600)
+            .create_new(true)
+            .open(agent_path)?;
+        write!(agent_file, "{}", addr)?;
+    }
+    Ok(cleanup)
+}
+
+pub fn read_agent_addr() -> std::io::Result<String> {
+    let mut agent_path_buf = match std::env::home_dir() {
+        Some(home) => home,
+        None => {
+            return Err(std::io::Error::new(std::io::ErrorKind::Other,
+                                           "cannot determine home directory"))
+        }
+    };
+    agent_path_buf.push(".glop.agent");
+    let agent_path = agent_path_buf.to_str().unwrap();
+    let mut agent_file = std::fs::File::open(agent_path)?;
+    let mut result = String::new();
+    agent_file.read_to_string(&mut result)?;
+    Ok(result)
 }

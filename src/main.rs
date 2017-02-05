@@ -47,11 +47,19 @@ fn main() {
             .about("get message in context")
             .arg(Arg::with_name("TOPIC").index(1).required(true))
             .arg(Arg::with_name("KEY").index(2).required(true)))
+        .subcommand(SubCommand::with_name("add")
+            .about("add an agent")
+            .arg(Arg::with_name("NAME").index(1).required(true))
+            .arg(Arg::with_name("SOURCE").index(2).required(true)))
+        .subcommand(SubCommand::with_name("remove")
+            .about("remove an agent")
+            .arg(Arg::with_name("NAME").index(1).required(true)))
+        .subcommand(SubCommand::with_name("list").about("list agents"))
         .subcommand(SubCommand::with_name("send")
-            .about("send a message")
-            .arg(Arg::with_name("recipient").long("recipient").short("r").default_value("self"))
-            .arg(Arg::with_name("topic").long("topic").short("t").required(true))
-            .arg(Arg::with_name("CONTENTS").index(1).multiple(true).required(false)));
+            .about("send a message to an agent")
+            .arg(Arg::with_name("NAME").index(1).required(true))
+            .arg(Arg::with_name("TOPIC").index(2).required(true))
+            .arg(Arg::with_name("CONTENTS").index(3).multiple(true).required(false)));
     let app_m = app.get_matches();
     let result = match app_m.subcommand_name() {
         Some("agent") => cmd_agent(app_m.subcommand_matches("agent").unwrap()),
@@ -59,6 +67,9 @@ fn main() {
         Some("getvar") => cmd_getvar(app_m.subcommand_matches("getvar").unwrap()),
         Some("setvar") => cmd_setvar(app_m.subcommand_matches("setvar").unwrap()),
         Some("getmsg") => cmd_getmsg(app_m.subcommand_matches("getmsg").unwrap()),
+        Some("add") => cmd_add(app_m.subcommand_matches("add").unwrap()),
+        Some("remove") => cmd_remove(app_m.subcommand_matches("remove").unwrap()),
+        Some("list") => cmd_list(app_m.subcommand_matches("list").unwrap()),
         Some(subcmd) => {
             println!("unsupported command {}", subcmd);
             println!("{}", app_m.usage());
@@ -129,15 +140,13 @@ fn cmd_run<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
 }
 
 fn cmd_getvar<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
-    let core = tokio_core::reactor::Core::new().map_err(Error::IO)?;
+    let mut core = tokio_core::reactor::Core::new().map_err(Error::IO)?;
     let handle = core.handle();
     let addr_str = std::env::var("ADDR").map_err(Error::Env)?;
     let addr = addr_str.parse().map_err(Error::AddrParse)?;
     let req = script::Request::GetVar { key: app_m.value_of("KEY").unwrap().to_string() };
     let builder = TcpClient::new(script::ClientProto);
-    let resp = builder.connect(&addr, &handle)
-        .and_then(|svc| svc.call(req))
-        .wait()
+    let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
         .map_err(Error::IO)?;
     match resp {
         script::Response::GetVar { key: _, ref value } => {
@@ -167,7 +176,7 @@ fn cmd_setvar<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
 }
 
 fn cmd_getmsg<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
-    let core = Core::new()?;
+    let mut core = Core::new()?;
     let handle = core.handle();
     let addr_str = std::env::var("ADDR").map_err(Error::Env)?;
     let addr = addr_str.parse().map_err(Error::AddrParse)?;
@@ -176,11 +185,64 @@ fn cmd_getmsg<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
         key: app_m.value_of("KEY").unwrap().to_string(),
     };
     let builder = TcpClient::new(script::ClientProto);
-    let resp =
-        builder.connect(&addr, &handle).and_then(|svc| svc.call(req)).wait().map_err(Error::IO)?;
+    let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
+        .map_err(Error::IO)?;
     match resp {
         script::Response::GetMsg { topic: _, key: _, ref value } => {
             println!("{}", value);
+            Ok(())
+        }
+        _ => Err(Error::BadResponse),
+    }
+}
+
+fn cmd_add<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
+    let mut core = Core::new()?;
+    let handle = core.handle();
+    let addr_str = agent::read_agent_addr().map_err(Error::IO)?;
+    let addr = addr_str.parse().map_err(Error::AddrParse)?;
+    let req = agent::Request::Add {
+        source: app_m.value_of("SOURCE").unwrap().to_string(),
+        name: app_m.value_of("NAME").unwrap().to_string(),
+    };
+    let builder = TcpClient::new(agent::ClientProto);
+    let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
+        .map_err(Error::IO)?;
+    match resp {
+        agent::Response::Add => Ok(()),
+        _ => Err(Error::BadResponse),
+    }
+}
+
+fn cmd_remove<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
+    let mut core = Core::new()?;
+    let handle = core.handle();
+    let addr_str = agent::read_agent_addr().map_err(Error::IO)?;
+    let addr = addr_str.parse().map_err(Error::AddrParse)?;
+    let req = agent::Request::Remove { name: app_m.value_of("NAME").unwrap().to_string() };
+    let builder = TcpClient::new(agent::ClientProto);
+    let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
+        .map_err(Error::IO)?;
+    match resp {
+        agent::Response::Remove => Ok(()),
+        _ => Err(Error::BadResponse),
+    }
+}
+
+fn cmd_list<'a>(_app_m: &ArgMatches<'a>) -> AppResult<()> {
+    let mut core = Core::new()?;
+    let handle = core.handle();
+    let addr_str = agent::read_agent_addr().map_err(Error::IO)?;
+    let addr = addr_str.parse().map_err(Error::AddrParse)?;
+    let req = agent::Request::List;
+    let builder = TcpClient::new(agent::ClientProto);
+    let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
+        .map_err(Error::IO)?;
+    match resp {
+        agent::Response::List { ref names } => {
+            for name in names {
+                println!("{}", name);
+            }
             Ok(())
         }
         _ => Err(Error::BadResponse),

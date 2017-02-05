@@ -67,8 +67,8 @@ impl Codec for ServiceCodec {
 }
 
 impl Codec for ClientCodec {
-    type In = Response;
     type Out = Request;
+    type In = Response;
 
     fn decode(&mut self, buf: &mut EasyBuf) -> std::io::Result<Option<Self::In>> {
         if let Some(i) = buf.as_slice().iter().position(|&b| b == b'\n') {
