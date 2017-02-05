@@ -123,9 +123,9 @@ impl tokio_core::io::Codec for ClientCodec {
 #[derive(Serialize, Deserialize)]
 pub struct Envelope {
     // src: String,
-    dst: String,
-    topic: String,
-    contents: Obj,
+    pub dst: String,
+    pub topic: String,
+    pub contents: Obj,
 }
 
 pub struct Agent {

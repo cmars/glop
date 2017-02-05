@@ -17,12 +17,13 @@ use tokio_proto::TcpClient;
 use tokio_service::Service;
 
 extern crate glop;
+use glop::agent;
+use glop::error::Error;
 use glop::grammar;
 use glop::runtime;
-use glop::agent;
 use glop::signal_fix;
 use glop::script;
-use glop::error::Error;
+use glop::value;
 
 type AppResult<T> = Result<T, Error>;
 
@@ -70,6 +71,7 @@ fn main() {
         Some("add") => cmd_add(app_m.subcommand_matches("add").unwrap()),
         Some("remove") => cmd_remove(app_m.subcommand_matches("remove").unwrap()),
         Some("list") => cmd_list(app_m.subcommand_matches("list").unwrap()),
+        Some("send") => cmd_send(app_m.subcommand_matches("send").unwrap()),
         Some(subcmd) => {
             println!("unsupported command {}", subcmd);
             println!("{}", app_m.usage());
@@ -245,6 +247,25 @@ fn cmd_list<'a>(_app_m: &ArgMatches<'a>) -> AppResult<()> {
             }
             Ok(())
         }
+        _ => Err(Error::BadResponse),
+    }
+}
+
+fn cmd_send<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
+    let mut core = Core::new()?;
+    let handle = core.handle();
+    let addr_str = agent::read_agent_addr().map_err(Error::IO)?;
+    let addr = addr_str.parse().map_err(Error::AddrParse)?;
+    let req = agent::Request::SendTo(agent::Envelope {
+        dst: app_m.value_of("NAME").unwrap().to_string(),
+        topic: app_m.value_of("TOPIC").unwrap().to_string(),
+        contents: value::Obj::new(),
+    });
+    let builder = TcpClient::new(agent::ClientProto);
+    let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
+        .map_err(Error::IO)?;
+    match resp {
+        agent::Response::SendTo => Ok(()),
         _ => Err(Error::BadResponse),
     }
 }

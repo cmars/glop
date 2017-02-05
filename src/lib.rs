@@ -3,7 +3,6 @@ extern crate serde_derive;
 
 mod ast;
 mod cleanup;
-mod value;
 
 pub mod agent;
 pub mod error;
@@ -13,6 +12,7 @@ pub mod grammar {
 pub mod runtime;
 pub mod script;
 pub mod signal_fix;
+pub mod value;
 
 mod test_grammar;
 mod test_runtime;
