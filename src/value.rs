@@ -57,6 +57,15 @@ impl Value {
         Value::Object(o)
     }
 
+    pub fn from_flat_map(m: HashMap<String, String>) -> Obj {
+        let mut result = Obj::new();
+        for (k, v) in m.iter() {
+            let id = Identifier::from_str(&k);
+            id.set(&mut result, Value::from_str(v));
+        }
+        result
+    }
+
     pub fn to_string(&self) -> String {
         match self {
             &Value::Int(ref i) => i.to_string(),

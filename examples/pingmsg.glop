@@ -1,7 +1,23 @@
 // This agent will echo "pong" to messages of topic "ping".
+// The contents of "message.text" or "message.special"
+// in the ping message will also be echoed. 
+//
+// For example, given an agent 'a' running this glopfile:
+//  glop send a ping     # just echos "pong"
+//  glop send a foo.bar  # same
+//  glop send a message.text="hello"     # echos the message.text "hello"
+//  glop send a message.special="sauce"  # echos the sauce
 
 match (message ping) {
   script #!/bin/bash
+message=$(glop getmsg ping message.text)
+if [ -n "${message}" ]; then
+	echo "message text: $message"
+fi
+message_special=$(glop getmsg ping message.special)
+if [ -n "${message_special}" ]; then
+	echo "message special: $message_special"
+fi
 echo pong
 !#
   acknowledge ping;
