@@ -104,29 +104,12 @@ impl std::error::Error for Error {
     }
 }
 
-pub trait Stateful {
-    fn get_var(&mut self, key: &Identifier) -> Option<&Value>;
-
-    fn set_var(&mut self, key: &Identifier, value: Value);
-
-    fn unset_var(&mut self, key: &Identifier);
-
-    fn ack_msg(&mut self, topic: &str) -> RuntimeResult<()>;
-}
-
 pub struct Context {
     pub vars: HashMap<String, Value>,
     pub msgs: HashMap<String, Msg>,
 }
 
 impl Context {
-    fn new(st: &mut State, m: &Match) -> Context {
-        Context {
-            vars: st.vars.clone(),
-            msgs: st.next_messages(&m.msg_topics),
-        }
-    }
-
     fn set_env(&self, cmd: &mut Command) {
         for (k, v) in Value::to_env(&self.vars) {
             cmd.env(k, v);
@@ -150,22 +133,39 @@ impl Context {
             None => None,
         }
     }
+
+    fn get_var<'b>(&'b mut self, key: &Identifier) -> Option<&'b Value> {
+        key.get(&mut self.vars)
+    }
+
+    fn set_var(&mut self, key: &Identifier, value: Value) {
+        key.set(&mut self.vars, value)
+    }
+
+    fn unset_var(&mut self, key: &Identifier) {
+        key.unset(&mut self.vars)
+    }
+
+    fn ack_msg(&mut self, topic: &str) -> RuntimeResult<()> {
+        match self.msgs.remove(topic) {
+            Some(_) => Ok(()),
+            None => Err(Error::Acknowledge(topic.to_string())),
+        }
+    }
 }
 
-pub struct Transaction<'a> {
+pub struct Transaction {
     pub seq: i32,
     pub ctx: Arc<Mutex<Context>>,
     pub applied: Vec<Action>,
-    pub st: &'a mut State,
 }
 
-impl<'a> Transaction<'a> {
-    fn new(st: &'a mut State, m: &Match) -> Transaction<'a> {
+impl Transaction {
+    fn new(seq: i32, ctx: Context) -> Transaction {
         Transaction {
-            seq: st.seq,
-            ctx: Arc::new(Mutex::new(Context::new(st, m))),
+            seq: seq,
+            ctx: Arc::new(Mutex::new(ctx)),
             applied: vec![],
-            st: st,
         }
     }
 
@@ -241,27 +241,6 @@ impl<'a> Transaction<'a> {
         let actions = run_script(self.ctx.clone(), script_path)?;
         drop(cleanup);
         Ok(actions)
-    }
-}
-
-impl Stateful for Context {
-    fn get_var<'b>(&'b mut self, key: &Identifier) -> Option<&'b Value> {
-        key.get(&mut self.vars)
-    }
-
-    fn set_var(&mut self, key: &Identifier, value: Value) {
-        key.set(&mut self.vars, value)
-    }
-
-    fn unset_var(&mut self, key: &Identifier) {
-        key.unset(&mut self.vars)
-    }
-
-    fn ack_msg(&mut self, topic: &str) -> RuntimeResult<()> {
-        match self.msgs.remove(topic) {
-            Some(_) => Ok(()),
-            None => Err(Error::Acknowledge(topic.to_string())),
-        }
     }
 }
 
@@ -525,7 +504,11 @@ impl State {
     }
 
     pub fn eval(&mut self, m: &Match) -> Option<Transaction> {
-        let txn = Transaction::new(self, m);
+        let ctx = Context {
+            vars: self.vars.clone(),
+            msgs: self.next_messages(&m.msg_topics),
+        };
+        let txn = Transaction::new(self.seq, ctx);
         let is_match = m.conditions
             .iter()
             .fold(true, |acc, c| acc && txn.eval(c));
@@ -558,14 +541,12 @@ impl State {
             _ => Err(Error::UnsupportedAction),
         }
     }
-}
 
-impl Stateful for State {
-    fn get_var<'b>(&'b mut self, key: &Identifier) -> Option<&'b Value> {
+    pub fn get_var<'b>(&'b mut self, key: &Identifier) -> Option<&'b Value> {
         key.get(&mut self.vars)
     }
 
-    fn set_var(&mut self, key: &Identifier, value: Value) {
+    pub fn set_var(&mut self, key: &Identifier, value: Value) {
         key.set(&mut self.vars, value)
     }
 

@@ -3,7 +3,6 @@
 use super::ast;
 use super::grammar;
 use super::runtime;
-use super::runtime::Stateful;
 use super::value::{Identifier, Value};
 
 const SIMPLE_INIT: &'static str = r#"match (message init) { acknowledge init; }"#;

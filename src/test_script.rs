@@ -4,7 +4,6 @@ use super::ast;
 use super::grammar;
 use super::runtime;
 use super::signal_fix;
-use super::runtime::Stateful;
 use super::value::{Identifier, Value};
 
 const SIMPLE_SCRIPT_OK: &'static str = r###"
