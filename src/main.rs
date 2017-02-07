@@ -22,6 +22,7 @@ use glop::agent;
 use glop::error::Error;
 use glop::grammar;
 use glop::runtime;
+use glop::runtime::State;
 use glop::signal_fix;
 use glop::script;
 use glop::value;
@@ -110,7 +111,7 @@ fn cmd_run<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let glop_file = app_m.value_of("GLOPFILE").unwrap();
     let glop_contents = try!(read_file(glop_file));
     let glop = grammar::glop(&glop_contents).map_err(Error::Parse)?;
-    let mut st = runtime::State::new();
+    let mut st = runtime::MemState::new();
     st.push_msg("init", runtime::Msg::new());
     let m_excs =
         glop.matches.iter().map(|m_ast| runtime::Match::new_from_ast(&m_ast)).collect::<Vec<_>>();

@@ -461,22 +461,36 @@ impl Clone for Action {
     }
 }
 
-pub struct State {
+pub trait State {
+    fn push_msg(&mut self, topic: &str, msg: Msg);
+    fn next_messages(&self, topics: &HashSet<String>) -> HashMap<String, Msg>;
+    fn eval(&mut self, m: &Match) -> Option<Transaction>;
+    fn commit(&mut self, actions: &Vec<Action>) -> RuntimeResult<i32>;
+    fn apply_action(&mut self, action: &Action) -> RuntimeResult<()>;
+    fn get_var<'b>(&'b mut self, key: &Identifier) -> Option<&'b Value>;
+    fn set_var(&mut self, key: &Identifier, value: Value);
+    fn unset_var(&mut self, key: &Identifier);
+    fn ack_msg(&mut self, topic: &str) -> RuntimeResult<()>;
+}
+
+pub struct MemState {
     seq: i32,
     vars: HashMap<String, Value>,
     inbox: HashMap<String, Vec<Msg>>,
 }
 
-impl State {
-    pub fn new() -> State {
-        State {
+impl MemState {
+    pub fn new() -> MemState {
+        MemState {
             seq: 0,
             vars: HashMap::new(),
             inbox: HashMap::new(),
         }
     }
+}
 
-    pub fn push_msg(&mut self, topic: &str, msg: Msg) {
+impl State for MemState {
+    fn push_msg(&mut self, topic: &str, msg: Msg) {
         match self.inbox.get_mut(topic) {
             Some(v) => {
                 v.push(msg);
@@ -503,7 +517,7 @@ impl State {
         next
     }
 
-    pub fn eval(&mut self, m: &Match) -> Option<Transaction> {
+    fn eval(&mut self, m: &Match) -> Option<Transaction> {
         let ctx = Context {
             vars: self.vars.clone(),
             msgs: self.next_messages(&m.msg_topics),
@@ -518,7 +532,7 @@ impl State {
         Some(txn)
     }
 
-    pub fn commit(&mut self, actions: &Vec<Action>) -> RuntimeResult<i32> {
+    fn commit(&mut self, actions: &Vec<Action>) -> RuntimeResult<i32> {
         for action in actions {
             self.apply_action(action)?;
         }
@@ -542,11 +556,11 @@ impl State {
         }
     }
 
-    pub fn get_var<'b>(&'b mut self, key: &Identifier) -> Option<&'b Value> {
+    fn get_var<'b>(&'b mut self, key: &Identifier) -> Option<&'b Value> {
         key.get(&mut self.vars)
     }
 
-    pub fn set_var(&mut self, key: &Identifier, value: Value) {
+    fn set_var(&mut self, key: &Identifier, value: Value) {
         key.set(&mut self.vars, value)
     }
 

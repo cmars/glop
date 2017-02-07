@@ -21,6 +21,7 @@ use super::error::Error;
 use super::cleanup;
 use super::grammar;
 use super::runtime;
+use super::runtime::State;
 use super::value::Obj;
 
 #[derive(Serialize, Deserialize)]
@@ -128,18 +129,21 @@ pub struct Envelope {
     pub contents: Obj,
 }
 
-pub struct Agent {
+pub struct Agent<S: State> {
     matches: Vec<runtime::Match>,
-    st: runtime::State,
+    st: S,
     receiver: mpsc::Receiver<Envelope>,
     match_index: usize,
 }
 
-impl Agent {
-    pub fn new_from_file(path: &str, receiver: mpsc::Receiver<Envelope>) -> Result<Agent, Error> {
+impl<S: State> Agent<S> {
+    pub fn new_from_file(path: &str,
+                         st: S,
+                         receiver: mpsc::Receiver<Envelope>)
+                         -> Result<Agent<S>, Error> {
         let glop_contents = read_file(path)?;
         let glop = grammar::glop(&glop_contents).map_err(Error::Parse)?;
-        let mut st = runtime::State::new();
+        let mut st = st;
         st.push_msg("init", Obj::new());
         let m_excs = glop.matches
             .iter()
@@ -152,9 +156,7 @@ impl Agent {
             match_index: 0,
         })
     }
-}
 
-impl Agent {
     fn poll_matches(&mut self) -> futures::Poll<Option<()>, runtime::Error> {
         let i = self.match_index % self.matches.len();
         let m = &self.matches[i];
@@ -179,7 +181,7 @@ impl Agent {
     }
 }
 
-impl futures::stream::Stream for Agent {
+impl<S: State> futures::stream::Stream for Agent<S> {
     type Item = ();
     type Error = runtime::Error;
 
@@ -226,8 +228,8 @@ impl Service {
             Request::Add { source: ref add_source, name: ref add_name } => {
                 let (sender, receiver) = mpsc::channel(10);
                 senders.insert(add_name.clone(), sender);
-                let agent =
-                    Agent::new_from_file(add_source, receiver).map_err(runtime::Error::Base)?;
+                let agent = Agent::new_from_file(
+                    add_source, runtime::MemState::new(), receiver).map_err(runtime::Error::Base)?;
                 self.handle.spawn(self.pool
                     .spawn(agent.for_each(|_| Ok(()))
                         .or_else(|e| {

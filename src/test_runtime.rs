@@ -3,6 +3,7 @@
 use super::ast;
 use super::grammar;
 use super::runtime;
+use super::runtime::State;
 use super::value::{Identifier, Value};
 
 const SIMPLE_INIT: &'static str = r#"when (message init) { acknowledge init; }"#;
@@ -21,7 +22,7 @@ fn parse_one_match(s: &str) -> ast::Match {
 #[test]
 fn unmatched_init_empty_state() {
     let m_ast = parse_one_match(SIMPLE_INIT);
-    let mut st = runtime::State::new();
+    let mut st = runtime::MemState::new();
     let m_exc = runtime::Match::new_from_ast(&m_ast);
     match st.eval(&m_exc) {
         Some(_) => panic!("unexpected match"),
@@ -32,7 +33,7 @@ fn unmatched_init_empty_state() {
 #[test]
 fn matched_init_message() {
     let m_ast = parse_one_match(SIMPLE_INIT);
-    let mut st = runtime::State::new();
+    let mut st = runtime::MemState::new();
     st.push_msg("init", runtime::Msg::new());
     let m_exc = runtime::Match::new_from_ast(&m_ast);
     let actions = match st.eval(&m_exc) {
@@ -58,7 +59,7 @@ fn matched_init_message() {
 #[test]
 fn matched_only_init_message() {
     let m_ast = parse_one_match(SIMPLE_INIT);
-    let mut st = runtime::State::new();
+    let mut st = runtime::MemState::new();
     st.push_msg("init", runtime::Msg::new());
     st.push_msg("blah",
                 [("foo".to_string(), Value::Str("bar".to_string()))]
@@ -89,7 +90,7 @@ fn matched_only_init_message() {
 #[test]
 fn matched_two_messages() {
     let m_ast = parse_one_match(TWO_MSGS);
-    let mut st = runtime::State::new();
+    let mut st = runtime::MemState::new();
     st.push_msg("foo", runtime::Msg::new());
     st.push_msg("bar", runtime::Msg::new());
     st.push_msg("foo", runtime::Msg::new());
@@ -122,7 +123,7 @@ fn matched_two_messages() {
 fn match_equal() {
     let m_ast = parse_one_match(SIMPLE_EQUAL);
     {
-        let mut st = runtime::State::new();
+        let mut st = runtime::MemState::new();
         st.set_var(&Identifier::from_str("foo"), Value::from_str("bar"));
         let m_exc = runtime::Match::new_from_ast(&m_ast);
         let actions = match st.eval(&m_exc) {
@@ -140,7 +141,7 @@ fn match_equal() {
         }
     }
     {
-        let mut st = runtime::State::new();
+        let mut st = runtime::MemState::new();
         st.set_var(&Identifier::from_str("foo"), Value::from_str("blah"));
         let m_exc = runtime::Match::new_from_ast(&m_ast);
         match st.eval(&m_exc) {
@@ -154,7 +155,7 @@ fn match_equal() {
 fn match_not_equal() {
     let m_ast = parse_one_match(SIMPLE_NOT_EQUAL);
     {
-        let mut st = runtime::State::new();
+        let mut st = runtime::MemState::new();
         st.set_var(&Identifier::from_str("foo"), Value::from_str("blah"));
         let m_exc = runtime::Match::new_from_ast(&m_ast);
         match st.eval(&m_exc) {
@@ -165,7 +166,7 @@ fn match_not_equal() {
         }
     }
     {
-        let mut st = runtime::State::new();
+        let mut st = runtime::MemState::new();
         st.set_var(&Identifier::from_str("foo"), Value::from_str("bar"));
         let m_exc = runtime::Match::new_from_ast(&m_ast);
         match st.eval(&m_exc) {
@@ -179,7 +180,7 @@ fn match_not_equal() {
 fn simple_commit_progression() {
     let m_exc_ne = runtime::Match::new_from_ast(&parse_one_match(SIMPLE_NOT_EQUAL));
     let m_exc_eq = runtime::Match::new_from_ast(&parse_one_match(SIMPLE_EQUAL));
-    let mut st = runtime::State::new();
+    let mut st = runtime::MemState::new();
     st.set_var(&Identifier::from_str("foo"), Value::from_str("blah"));
     // foo starts out != bar so we expect a match and apply
     let actions = match st.eval(&m_exc_ne) {
@@ -210,7 +211,7 @@ fn simple_commit_progression() {
 fn match_is_set() {
     let m_ast = parse_one_match(SIMPLE_IS_SET);
     {
-        let mut st = runtime::State::new();
+        let mut st = runtime::MemState::new();
         st.set_var(&Identifier::from_str("foo"), Value::from_str("bar"));
         let m_exc = runtime::Match::new_from_ast(&m_ast);
         let actions = match st.eval(&m_exc) {
@@ -227,7 +228,7 @@ fn match_is_set() {
         }
     }
     {
-        let mut st = runtime::State::new();
+        let mut st = runtime::MemState::new();
         st.set_var(&Identifier::from_str("bar"), Value::from_str("foo"));
         let m_exc = runtime::Match::new_from_ast(&m_ast);
         match st.eval(&m_exc) {

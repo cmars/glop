@@ -3,6 +3,7 @@
 use super::ast;
 use super::grammar;
 use super::runtime;
+use super::runtime::State;
 use super::signal_fix;
 use super::value::{Identifier, Value};
 
@@ -87,7 +88,7 @@ fn simple_script() {
     let _lock = signal_fix::lock();
 
     let m_ast = parse_one_match(SIMPLE_SCRIPT_OK);
-    let mut st = runtime::State::new();
+    let mut st = runtime::MemState::new();
     st.push_msg("init", runtime::Msg::new());
     let m_exc = runtime::Match::new_from_ast(&m_ast);
     match st.eval(&m_exc) {
@@ -110,7 +111,7 @@ fn simple_script_err() {
     let _lock = signal_fix::lock();
 
     let m_ast = parse_one_match(SIMPLE_SCRIPT_ERR);
-    let mut st = runtime::State::new();
+    let mut st = runtime::MemState::new();
     st.push_msg("init", runtime::Msg::new());
     let m_exc = runtime::Match::new_from_ast(&m_ast);
     match st.eval(&m_exc) {
@@ -146,7 +147,7 @@ fn env_check_script_ok() {
     let _lock = signal_fix::lock();
 
     let m_ast = parse_one_match(ENV_CHECK_SCRIPT);
-    let mut st = runtime::State::new();
+    let mut st = runtime::MemState::new();
     st.push_msg("test",
                 [("content".to_string(), Value::from_str("hello world"))]
                     .iter()
@@ -173,7 +174,7 @@ fn hello_script_server() {
     let _lock = signal_fix::lock();
 
     let m_ast = parse_one_match(HELLO_SCRIPT_SERVER);
-    let mut st = runtime::State::new();
+    let mut st = runtime::MemState::new();
     st.push_msg("init", runtime::Msg::new());
     let m_exc = runtime::Match::new_from_ast(&m_ast);
     let actions = match st.eval(&m_exc) {
@@ -199,7 +200,7 @@ fn script_server_access_msg() {
     let _lock = signal_fix::lock();
 
     let m_ast = parse_one_match(SCRIPT_SERVER_ACCESS_MSG);
-    let mut st = runtime::State::new();
+    let mut st = runtime::MemState::new();
     st.push_msg("init",
                 [("foo".to_string(), Value::Str("bar".to_string()))]
                     .iter()
