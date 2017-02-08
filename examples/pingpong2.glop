@@ -2,24 +2,20 @@
 // Variables are set by shelling out back to glop from within a script that is
 // executed by glop.
 
-match (message init) {
+when (message init) {
   set ping true;
 }
 
-match (ping == true) {
-  script #!/bin/bash
+when (ping == true) #!/bin/bash
 echo ping
 export ADDR
 glop setvar ping false
 glop setvar pong true
 !#
-}
 
-match (pong == true) {
-  script #!/bin/bash
+when (pong == true) #!/bin/bash
 echo pong
 export ADDR
 glop setvar ping true
 glop setvar pong false
 !#
-}

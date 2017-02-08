@@ -5,12 +5,12 @@ use super::grammar;
 use super::runtime;
 use super::value::{Identifier, Value};
 
-const SIMPLE_INIT: &'static str = r#"match (message init) { acknowledge init; }"#;
+const SIMPLE_INIT: &'static str = r#"when (message init) { acknowledge init; }"#;
 const TWO_MSGS: &'static str =
-    r#"match (message foo, message bar) { acknowledge foo; acknowledge bar; }"#;
-const SIMPLE_EQUAL: &'static str = r#"match (foo == bar) { unset foo; }"#;
-const SIMPLE_NOT_EQUAL: &'static str = r#"match (foo != bar) { set foo bar; }"#;
-const SIMPLE_IS_SET: &'static str = r#"match (is_set foo) { unset foo; }"#;
+    r#"when (message foo, message bar) { acknowledge foo; acknowledge bar; }"#;
+const SIMPLE_EQUAL: &'static str = r#"when (foo == bar) { unset foo; }"#;
+const SIMPLE_NOT_EQUAL: &'static str = r#"when (foo != bar) { set foo bar; }"#;
+const SIMPLE_IS_SET: &'static str = r#"when (is_set foo) { unset foo; }"#;
 
 fn parse_one_match(s: &str) -> ast::Match {
     let mut g = grammar::glop(s).unwrap();

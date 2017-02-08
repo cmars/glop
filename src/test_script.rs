@@ -7,7 +7,7 @@ use super::signal_fix;
 use super::value::{Identifier, Value};
 
 const SIMPLE_SCRIPT_OK: &'static str = r###"
-match (message init) {
+when (message init) {
     script #!/bin/bash
 set -ex
 echo "hello world"
@@ -15,7 +15,7 @@ echo "hello world"
 }
 "###;
 const SIMPLE_SCRIPT_ERR: &'static str = r###"
-match (message init) {
+when (message init) {
     script #!/bin/bash
 >&2 echo "crash and burn"
 exit 1
@@ -23,7 +23,7 @@ exit 1
 }
 "###;
 const ENV_CHECK_SCRIPT: &'static str = r###"
-match (message test) {
+when (message test) {
     set foo bar;
     script #!/bin/bash
 env
@@ -33,7 +33,7 @@ env
 }
 "###;
 const HELLO_SCRIPT_SERVER: &'static str = r###"
-match (message init) {
+when (message init) {
     set foo bar;
     script #!/bin/bash
 set -e
@@ -56,7 +56,7 @@ EOF
 }
 "###;
 const SCRIPT_SERVER_ACCESS_MSG: &'static str = r###"
-match (message init) {
+when (message init) {
     script #!/bin/bash
 set -e
 [ -n "$ADDR" ]

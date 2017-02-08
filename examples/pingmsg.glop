@@ -8,7 +8,7 @@
 //  glop send a message.text="hello"     # echos the message.text "hello"
 //  glop send a message.special="sauce"  # echos the sauce
 
-match (message ping) {
+when (message ping) {
   script #!/bin/bash
 message=$(glop getmsg ping message.text)
 if [ -n "${message}" ]; then

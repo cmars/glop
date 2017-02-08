@@ -1,11 +1,11 @@
 // This agent will ping-pong back and forth internally with its variables.
 // Variables are manipulated by the 'set' action keyword.
 
-match (message init) {
+when (message init) {
   set ping true;
 }
 
-match (ping == true) {
+when (ping == true) {
   script #!/bin/bash
 echo ping
 !#
@@ -13,7 +13,7 @@ echo ping
   set pong true;
 }
 
-match (pong == true) {
+when (pong == true) {
   script #!/bin/bash
 echo pong
 !#

@@ -108,7 +108,7 @@ impl<'a> fmt::Display for FmtConditions<'a> {
 impl fmt::Display for Match {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f,
-                 "match ({}) {{\n{}}}",
+                 "when ({}) {{\n{}}}",
                  FmtConditions(&self.conditions),
                  FmtActions(&self.actions))
     }

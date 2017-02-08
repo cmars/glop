@@ -9,8 +9,11 @@ matches -> Vec<Match>
     / m:match { vec![m] }
 
 match -> Match
-    = "match" __ "(" __ c:conditions __ ")" __ "{" __ a:actions __ "}" {
+    = "when" __ "(" __ c:conditions __ ")" __ "{" __ a:actions __ "}" {
         Match{ conditions: c, actions: a }
+    }
+    / "when" __ "(" __ c:conditions __ ")" __ v:$("#!" (!"!#" .)+) "!#" {
+		Match{ conditions: c, actions: vec![Action::Script(String::from(v))] }
     }
 
 conditions -> Vec<Condition>
