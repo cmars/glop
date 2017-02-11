@@ -21,7 +21,7 @@ use super::error::Error;
 use super::cleanup;
 use super::grammar;
 use super::runtime;
-use super::runtime::State;
+use super::runtime::Storage;
 use super::value::Obj;
 
 #[derive(Serialize, Deserialize)]
@@ -129,22 +129,22 @@ pub struct Envelope {
     pub contents: Obj,
 }
 
-pub struct Agent<S: State> {
+pub struct Agent<S: Storage> {
     matches: Vec<runtime::Match>,
-    st: S,
+    st: runtime::State<S>,
     receiver: mpsc::Receiver<Envelope>,
     match_index: usize,
 }
 
-impl<S: State> Agent<S> {
+impl<S: Storage> Agent<S> {
     pub fn new_from_file(path: &str,
-                         st: S,
+                         st: runtime::State<S>,
                          receiver: mpsc::Receiver<Envelope>)
                          -> Result<Agent<S>, Error> {
         let glop_contents = read_file(path)?;
         let glop = grammar::glop(&glop_contents).map_err(Error::Parse)?;
         let mut st = st;
-        st.push_msg("init", Obj::new());
+        st.mut_storage().push_msg("init", Obj::new())?;
         let m_excs = glop.matches
             .iter()
             .map(|m_ast| runtime::Match::new_from_ast(&m_ast))
@@ -160,35 +160,31 @@ impl<S: State> Agent<S> {
     fn poll_matches(&mut self) -> futures::Poll<Option<()>, Error> {
         let i = self.match_index % self.matches.len();
         let m = &self.matches[i];
-        let actions = match self.st.eval(m) {
-            Some(ref mut txn) => {
-                match txn.apply(m) {
-                    Ok(actions) => actions,
-                    Err(e) => return Err(e),
-                }
-            }
-            None => {
-                return Ok(futures::Async::NotReady);
-            }
+        let txn = match self.st.eval(m.clone()) {
+            Ok(Some(txn)) => txn,
+            Ok(None) => return Ok(futures::Async::NotReady),
+            Err(e) => return Err(e),
         };
         // TODO: intelligent selection of next match?
         self.match_index = self.match_index + 1;
         // TODO: graceful agent termination (nothing left to do)?
-        match self.st.commit(&actions) {
+        match self.st.commit(txn) {
             Ok(_) => Ok(futures::Async::Ready(Some(()))),
             Err(e) => Err(e),
         }
     }
 }
 
-impl<S: State> futures::stream::Stream for Agent<S> {
+impl<S: Storage> futures::stream::Stream for Agent<S> {
     type Item = ();
     type Error = Error;
 
     fn poll(&mut self) -> futures::Poll<Option<Self::Item>, Self::Error> {
         // TODO: poll mpsc channel (receiver end) for state changes & apply?
         match self.receiver.poll() {
-            Ok(futures::Async::Ready(Some(env))) => self.st.push_msg(&env.topic, env.contents),
+            Ok(futures::Async::Ready(Some(env))) => {
+                self.st.mut_storage().push_msg(&env.topic, env.contents)?;
+            }
             Ok(futures::Async::Ready(None)) => return Ok(futures::Async::Ready(None)),
             Ok(futures::Async::NotReady) => {}
             Err(_) => return Ok(futures::Async::Ready(None)),
@@ -228,7 +224,9 @@ impl Service {
             Request::Add { source: ref add_source, name: ref add_name } => {
                 let (sender, receiver) = mpsc::channel(10);
                 senders.insert(add_name.clone(), sender);
-                let agent = Agent::new_from_file(add_source, runtime::MemState::new(), receiver)?;
+                let agent = Agent::new_from_file(add_source,
+                                                 runtime::State::new(runtime::MemStorage::new()),
+                                                 receiver)?;
                 self.handle.spawn(self.pool
                     .spawn(agent.for_each(|_| Ok(()))
                         .or_else(|e| {

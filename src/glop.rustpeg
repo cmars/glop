@@ -46,6 +46,7 @@ cmpop -> CmpOpcode
 actions -> Vec<Action>
     = n:action __ ns:actions { let mut ns = ns; ns.insert(0, n); ns }
     / n:action { vec![n] }
+	/ { vec![] }
 
 action -> Action
     = "set" __ k:identifier __ v:value __ ";" { Action::SetVar(k, v) }

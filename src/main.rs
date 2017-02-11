@@ -1,4 +1,5 @@
 extern crate clap;
+extern crate env_logger;
 extern crate futures;
 extern crate serde_json;
 extern crate tokio_core;
@@ -22,13 +23,14 @@ use glop::agent;
 use glop::error::Error;
 use glop::grammar;
 use glop::runtime;
-use glop::runtime::State;
+use glop::runtime::Storage;
 use glop::signal_fix;
 use glop::value;
 
 type AppResult<T> = Result<T, Error>;
 
 fn main() {
+    let _ = env_logger::init();
     let _lock = signal_fix::lock();
     let app = App::new("glop")
         .version("0")
@@ -110,33 +112,24 @@ fn cmd_run<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let glop_file = app_m.value_of("GLOPFILE").unwrap();
     let glop_contents = try!(read_file(glop_file));
     let glop = grammar::glop(&glop_contents).map_err(Error::Parse)?;
-    let mut st = runtime::MemState::new();
-    st.push_msg("init", value::Obj::new());
+    let mut st = runtime::State::new(runtime::MemStorage::new());
+    st.mut_storage().push_msg("init", value::Obj::new())?;
     let m_excs =
         glop.matches.iter().map(|m_ast| runtime::Match::new_from_ast(&m_ast)).collect::<Vec<_>>();
     loop {
         for m_exc in &m_excs {
-            let result = match st.eval(&m_exc) {
-                Some(ref mut ctx) => {
-                    match ctx.apply(&m_exc) {
-                        Ok(result) => Some(result),
-                        Err(e) => {
-                            println!("{}", e);
-                            None
-                        }
-                    }
+            let txn = match st.eval(m_exc.clone()) {
+                Ok(Some(txn)) => txn,
+                Ok(None) => continue,
+                Err(e) => {
+                    println!("{}", e);
+                    continue;
                 }
-                None => None,
             };
-            match result {
-                Some(actions) => {
-                    match st.commit(&actions) {
-                        Ok(_) => {}
-                        Err(e) => println!("{}", e),
-                    }
-                }
-                None => {}
-            }
+            match st.commit(txn) {
+                Ok(_seq) => (),
+                Err(e) => println!("{}", e),
+            };
             thread::sleep(time::Duration::from_millis(200));
         }
     }

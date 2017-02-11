@@ -8,8 +8,7 @@
 //  glop send a message.text="hello"     # echos the message.text "hello"
 //  glop send a message.special="sauce"  # echos the sauce
 
-when (message ping) {
-  script #!/bin/bash
+when (message ping) #!/bin/bash
 message=$(glop getmsg ping message.text)
 if [ -n "${message}" ]; then
 	echo "message text: $message"
@@ -20,5 +19,3 @@ if [ -n "${message_special}" ]; then
 fi
 echo pong
 !#
-  acknowledge ping;
-}

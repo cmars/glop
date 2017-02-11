@@ -3,7 +3,7 @@
 use super::*;
 use super::super::grammar;
 use super::super::signal_fix;
-use self::value::{Identifier, Obj, Value};
+use self::value::{Obj, Value};
 
 const SIMPLE_SCRIPT_OK: &'static str = r###"
 when (message init) {
@@ -28,7 +28,6 @@ when (message test) {
 env
 [ "${test__content}" == "hello world" ]
 !#
-    acknowledge test;
 }
 "###;
 const HELLO_SCRIPT_SERVER: &'static str = r###"
@@ -86,22 +85,21 @@ fn simple_script() {
     let _lock = signal_fix::lock();
 
     let m_ast = parse_one_match(SIMPLE_SCRIPT_OK);
-    let mut st = MemState::new();
-    st.push_msg("init", Obj::new());
+    let mut st = State::new(MemStorage::new());
+    st.mut_storage().push_msg("init", Obj::new()).unwrap();
     let m_exc = Match::new_from_ast(&m_ast);
-    match st.eval(&m_exc) {
-        Some(ref mut txn) => {
+    let txn = match st.eval(m_exc.clone()).unwrap() {
+        Some(mut txn) => {
             assert_eq!(txn.seq, 0);
-            assert!(txn.with_context(|ref mut ctx| {
-                    assert!(ctx.msgs.contains_key("init"));
-                    assert_eq!(ctx.msgs.len(), 1);
-                    Ok(())
-                })
-                .is_ok());
-            assert!(txn.apply(&m_exc).is_ok());
+            txn.with_context(|ref mut ctx| {
+                assert!(ctx.msgs.contains_key("init"));
+                assert_eq!(ctx.msgs.len(), 1);
+            });
+            txn
         }
         None => panic!("expected match"),
-    }
+    };
+    assert!(st.commit(txn).is_ok());
 }
 
 #[test]
@@ -109,34 +107,33 @@ fn simple_script_err() {
     let _lock = signal_fix::lock();
 
     let m_ast = parse_one_match(SIMPLE_SCRIPT_ERR);
-    let mut st = MemState::new();
-    st.push_msg("init", Obj::new());
+    let mut st = State::new(MemStorage::new());
+    st.mut_storage().push_msg("init", Obj::new()).unwrap();
     let m_exc = Match::new_from_ast(&m_ast);
-    match st.eval(&m_exc) {
-        Some(ref mut txn) => {
+    let txn = match st.eval(m_exc.clone()).unwrap() {
+        Some(mut txn) => {
             assert_eq!(txn.seq, 0);
-            assert!(txn.with_context(|ref mut ctx| {
-                    assert!(ctx.msgs.contains_key("init"));
-                    assert_eq!(ctx.msgs.len(), 1);
-                    Ok(())
-                })
-                .is_ok());
-            match txn.apply(&m_exc) {
-                Ok(_) => panic!("expected script to error"),
-                Err(e) => {
-                    match e {
-                        Error::Exec(rc, ref stderr) => {
-                            assert_eq!(rc, 1);
-                            assert_eq!(stderr, "crash and burn\n");
-                        }
-                        _ => {
-                            panic!("unexpected error: {}", e);
-                        }
-                    }
+            txn.with_context(|ref mut ctx| {
+                assert!(ctx.msgs.contains_key("init"));
+                assert_eq!(ctx.msgs.len(), 1);
+            });
+            txn
+        }
+        None => panic!("expected match"),
+    };
+    match st.commit(txn) {
+        Ok(_) => panic!("expected script to error"),
+        Err(e) => {
+            match e {
+                Error::Exec(rc, ref stderr) => {
+                    assert_eq!(rc, 1);
+                    assert_eq!(stderr, "crash and burn\n");
+                }
+                _ => {
+                    panic!("unexpected error: {}", e);
                 }
             }
         }
-        None => panic!("expected match"),
     }
 }
 
@@ -145,26 +142,27 @@ fn env_check_script_ok() {
     let _lock = signal_fix::lock();
 
     let m_ast = parse_one_match(ENV_CHECK_SCRIPT);
-    let mut st = MemState::new();
-    st.push_msg("test",
-                [("content".to_string(), Value::from_str("hello world"))]
-                    .iter()
-                    .cloned()
-                    .collect());
+    let mut st = State::new(MemStorage::new());
+    st.mut_storage()
+        .push_msg("test",
+                  [("content".to_string(), Value::from_str("hello world"))]
+                      .iter()
+                      .cloned()
+                      .collect())
+        .unwrap();
     let m_exc = Match::new_from_ast(&m_ast);
-    match st.eval(&m_exc) {
-        Some(ref mut txn) => {
+    let txn = match st.eval(m_exc.clone()).unwrap() {
+        Some(mut txn) => {
             assert_eq!(txn.seq, 0);
-            assert!(txn.with_context(|ref mut ctx| {
-                    assert!(ctx.msgs.contains_key("test"));
-                    assert_eq!(ctx.msgs.len(), 1);
-                    Ok(())
-                })
-                .is_ok());
-            assert!(txn.apply(&m_exc).is_ok());
+            txn.with_context(|ref mut ctx| {
+                assert!(ctx.msgs.contains_key("test"));
+                assert_eq!(ctx.msgs.len(), 1);
+            });
+            txn
         }
         None => panic!("expected match"),
-    }
+    };
+    assert!(st.commit(txn).is_ok());
 }
 
 #[test]
@@ -172,24 +170,22 @@ fn hello_script_server() {
     let _lock = signal_fix::lock();
 
     let m_ast = parse_one_match(HELLO_SCRIPT_SERVER);
-    let mut st = MemState::new();
-    st.push_msg("init", Obj::new());
+    let mut st = State::new(MemStorage::new());
+    st.mut_storage().push_msg("init", Obj::new()).unwrap();
     let m_exc = Match::new_from_ast(&m_ast);
-    let actions = match st.eval(&m_exc) {
-        Some(ref mut txn) => {
+    let txn = match st.eval(m_exc.clone()).unwrap() {
+        Some(mut txn) => {
             assert_eq!(txn.seq, 0);
-            assert!(txn.with_context(|ref mut ctx| {
-                    assert!(ctx.msgs.contains_key("init"));
-                    assert_eq!(ctx.msgs.len(), 1);
-                    Ok(())
-                })
-                .is_ok());
-            txn.apply(&m_exc).unwrap()
+            txn.with_context(|ctx| {
+                assert!(ctx.msgs.contains_key("init"));
+                assert_eq!(ctx.msgs.len(), 1);
+            });
+            txn
         }
         None => panic!("expected match"),
     };
-    assert!(st.commit(&actions).is_ok());
-    assert_eq!(st.get_var(&Identifier::from_str("foo")),
+    assert!(st.commit(txn).is_ok());
+    assert_eq!(st.storage().vars().get("foo"),
                Some(&Value::from_str("hello-bar")));
 }
 
@@ -198,18 +194,20 @@ fn script_server_access_msg() {
     let _lock = signal_fix::lock();
 
     let m_ast = parse_one_match(SCRIPT_SERVER_ACCESS_MSG);
-    let mut st = MemState::new();
-    st.push_msg("init",
-                [("foo".to_string(), Value::Str("bar".to_string()))]
-                    .iter()
-                    .cloned()
-                    .collect());
+    let mut st = State::new(MemStorage::new());
+    st.mut_storage()
+        .push_msg("init",
+                  [("foo".to_string(), Value::Str("bar".to_string()))]
+                      .iter()
+                      .cloned()
+                      .collect())
+        .unwrap();
     let m_exc = Match::new_from_ast(&m_ast);
-    let actions = match st.eval(&m_exc) {
-        Some(ref mut txn) => txn.apply(&m_exc).unwrap(),
+    let txn = match st.eval(m_exc.clone()).unwrap() {
+        Some(txn) => txn,
         None => panic!("expected match"),
     };
-    assert!(st.commit(&actions).is_ok());
-    assert_eq!(st.get_var(&Identifier::from_str("all")),
+    assert!(st.commit(txn).is_ok());
+    assert_eq!(st.storage().vars().get("all"),
                Some(&Value::from_str("good")));
 }

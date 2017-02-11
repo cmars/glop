@@ -2,21 +2,11 @@ use std::collections::HashMap;
 
 use super::ast;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Value {
     Int(i32),
     Str(String),
     Object(Obj),
-}
-
-impl Clone for Value {
-    fn clone(&self) -> Value {
-        match self {
-            &Value::Int(i) => Value::Int(i),
-            &Value::Str(ref s) => Value::Str(s.clone()),
-            &Value::Object(ref o) => Value::Object(o.clone()),
-        }
-    }
 }
 
 impl PartialEq for Value {
@@ -99,6 +89,7 @@ pub type Obj = HashMap<String, Value>;
 
 pub type Env = HashMap<String, String>;
 
+#[derive(Clone, Debug)]
 pub struct Identifier(Vec<String>);
 
 impl Identifier {
@@ -198,11 +189,5 @@ impl Identifier {
             }
             None => {}
         }
-    }
-}
-
-impl Clone for Identifier {
-    fn clone(&self) -> Identifier {
-        Identifier(self.0.clone())
     }
 }

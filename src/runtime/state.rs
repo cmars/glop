@@ -3,122 +3,150 @@ use std::collections::{HashMap, HashSet};
 use super::*;
 use self::context::Context;
 use self::transaction::Transaction;
-use self::value::{Identifier, Obj, Value};
+use self::value::{Obj, Value};
 
-pub trait State {
-    fn push_msg(&mut self, topic: &str, msg: Obj);
-    fn next_messages(&self, topics: &HashSet<String>) -> HashMap<String, Obj>;
-    fn eval(&mut self, m: &Match) -> Option<Transaction>;
-    fn commit(&mut self, actions: &Vec<Action>) -> Result<i32>;
-    fn apply_action(&mut self, action: &Action) -> Result<()>;
-    fn get_var<'b>(&'b mut self, key: &Identifier) -> Option<&'b Value>;
-    fn set_var(&mut self, key: &Identifier, value: Value);
-    fn unset_var(&mut self, key: &Identifier);
-    fn ack_msg(&mut self, topic: &str) -> Result<()>;
+pub trait Storage {
+    fn load(&mut self) -> Result<(i32, HashMap<String, Value>)>;
+    fn save(&mut self, seq: i32, vars: HashMap<String, Value>) -> Result<()>;
+
+    fn next_messages(&mut self, topics: &HashSet<String>) -> Result<HashMap<String, Obj>>;
+    fn push_msg(&mut self, topic: &str, msg: Obj) -> Result<()>;
+
+    fn vars(&self) -> &HashMap<String, Value>;
+    fn mut_vars(&mut self) -> &mut HashMap<String, Value>;
 }
 
-pub struct MemState {
+pub struct MemStorage {
     seq: i32,
     vars: HashMap<String, Value>,
-    inbox: HashMap<String, Vec<Obj>>,
+    msgs: HashMap<String, Vec<Obj>>,
 }
 
-impl MemState {
-    pub fn new() -> MemState {
-        MemState {
+impl MemStorage {
+    pub fn new() -> MemStorage {
+        MemStorage {
             seq: 0,
             vars: HashMap::new(),
-            inbox: HashMap::new(),
+            msgs: HashMap::new(),
         }
     }
 }
 
-impl State for MemState {
-    fn push_msg(&mut self, topic: &str, msg: Obj) {
-        match self.inbox.get_mut(topic) {
-            Some(v) => {
-                v.push(msg);
-                return;
-            }
-            _ => {}
-        }
-        self.inbox.insert(topic.to_string(), vec![msg]);
+impl Storage for MemStorage {
+    fn load(&mut self) -> Result<(i32, HashMap<String, Value>)> {
+        Ok((self.seq, self.vars.clone()))
     }
 
-    fn next_messages(&self, topics: &HashSet<String>) -> HashMap<String, Obj> {
+    fn save(&mut self, seq: i32, vars: HashMap<String, Value>) -> Result<()> {
+        if seq < self.seq {
+            return Err(error::Error::InvalidArgument("stale transaction".to_string()));
+        }
+        debug!(target: "MemStorage.save", "vars before={:?} after={:?}", &self.vars, &vars);
+        self.vars = vars;
+        self.seq = seq + 1;
+        Ok(())
+    }
+
+    fn next_messages(&mut self, topics: &HashSet<String>) -> Result<HashMap<String, Obj>> {
         let mut next: HashMap<String, Obj> = HashMap::new();
-        for (k, v) in &self.inbox {
+        for (k, v) in &mut self.msgs {
             if !topics.contains(k) {
                 continue;
             }
-            match v.last() {
+            match v.pop() {
                 Some(msg) => {
                     next.insert(k.to_string(), msg.clone());
                 }
                 None => (),
             }
         }
-        next
+        Ok(next)
     }
 
-    fn eval(&mut self, m: &Match) -> Option<Transaction> {
-        let ctx = Context {
-            vars: self.vars.clone(),
-            msgs: self.next_messages(&m.msg_topics),
-        };
-        let txn = Transaction::new(self.seq, ctx);
-        let is_match = m.conditions
-            .iter()
-            .fold(true, |acc, c| acc && txn.eval(c));
-        if !is_match {
-            return None;
-        }
-        Some(txn)
-    }
-
-    fn commit(&mut self, actions: &Vec<Action>) -> Result<i32> {
-        for action in actions {
-            self.apply_action(action)?;
-        }
-        let result = self.seq;
-        self.seq += 1;
-        Ok(result)
-    }
-
-    fn apply_action(&mut self, action: &Action) -> Result<()> {
-        match action {
-            &Action::SetVar(ref k, ref v) => {
-                self.set_var(k, Value::Str(v.to_string()));
-                Ok(())
-            }
-            &Action::UnsetVar(ref k) => {
-                self.unset_var(k);
-                Ok(())
-            }
-            &Action::Acknowledge(ref k) => self.ack_msg(k),
-            _ => Err(Error::UnsupportedAction),
-        }
-    }
-
-    fn get_var<'b>(&'b mut self, key: &Identifier) -> Option<&'b Value> {
-        key.get(&mut self.vars)
-    }
-
-    fn set_var(&mut self, key: &Identifier, value: Value) {
-        key.set(&mut self.vars, value)
-    }
-
-    fn unset_var(&mut self, key: &Identifier) {
-        key.unset(&mut self.vars)
-    }
-
-    fn ack_msg(&mut self, topic: &str) -> Result<()> {
-        match self.inbox.get_mut(topic) {
+    fn push_msg(&mut self, topic: &str, msg: Obj) -> Result<()> {
+        match self.msgs.get_mut(topic) {
             Some(v) => {
-                v.pop();
-                Ok(())
+                v.push(msg);
+                return Ok(());
             }
-            None => Err(Error::Acknowledge(topic.to_string())),
+            _ => {}
         }
+        self.msgs.insert(topic.to_string(), vec![msg]);
+        Ok(())
+    }
+
+    fn vars(&self) -> &HashMap<String, Value> {
+        &self.vars
+    }
+
+    fn mut_vars(&mut self) -> &mut HashMap<String, Value> {
+        &mut self.vars
+    }
+}
+
+pub struct State<S: Storage> {
+    storage: S,
+}
+
+impl<S: Storage> State<S> {
+    pub fn new(storage: S) -> State<S> {
+        State { storage: storage }
+    }
+
+    pub fn storage(&self) -> &S {
+        &self.storage
+    }
+
+    pub fn mut_storage(&mut self) -> &mut S {
+        &mut self.storage
+    }
+
+    pub fn eval(&mut self, m: Match) -> Result<Option<Transaction>> {
+        debug!(target: "State.eval", "{:?}", &m);
+        let (seq, vars) = self.storage.load()?;
+        let msgs = self.storage.next_messages(&m.msg_topics)?;
+        let ctx = Context {
+            vars: vars,
+            msgs: msgs,
+        };
+        let txn = Transaction::new(m, seq, ctx);
+        if txn.eval() {
+            debug!(target: "State.eval", "MATCHED");
+            Ok(Some(txn))
+        } else {
+            debug!(target:"State.eval", "MISSED");
+            Ok(None)
+        }
+    }
+
+    pub fn commit(&mut self, txn: Transaction) -> Result<i32> {
+        debug!(target: "State.commit", "BEGIN transaction seq={}", txn.seq);
+        let mut txn = txn;
+        let mut vars = self.storage.vars().clone();
+        let actions = txn.apply()?;
+        for action in actions {
+            debug!(target: "State.commit", "action {:?}", action);
+            match &action {
+                &Action::SetVar(ref k, ref v) => {
+                    k.set(&mut vars, Value::Str(v.to_string()));
+                }
+                &Action::UnsetVar(ref k) => {
+                    k.unset(&mut vars);
+                }
+                _ => return Err(Error::UnsupportedAction),
+            };
+        }
+        self.storage.save(txn.seq, vars)?;
+        debug!(target: "State.commit", "OK transaction seq={}", txn.seq);
+        Ok(txn.seq)
+    }
+
+    pub fn rollback(&mut self, txn: Transaction) -> Result<()> {
+        let mut txn = txn;
+        let msgs = txn.with_context(|ctx| ctx.msgs.clone());
+        for (topic, msg) in msgs {
+            self.storage.push_msg(&topic, msg)?;
+        }
+        Ok(())
     }
 }

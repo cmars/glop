@@ -46,6 +46,6 @@ fn err_empty_conditions() {
 
 #[test]
 fn err_empty_actions() {
-    assert!(grammar::glop(r#"when (foo == "bar") { }"#).is_err());
+    assert!(grammar::glop(r#"when (foo == "bar") { }"#).is_ok());
     assert!(grammar::glop(r#"when (foo == "bar")"#).is_err());
 }

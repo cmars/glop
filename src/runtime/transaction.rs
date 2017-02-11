@@ -11,28 +11,57 @@ use self::context::Context;
 use self::value::Value;
 
 pub struct Transaction {
+    pub m: Match,
     pub seq: i32,
     pub ctx: Arc<Mutex<Context>>,
     pub applied: Vec<Action>,
 }
 
 impl Transaction {
-    pub fn new(seq: i32, ctx: Context) -> Transaction {
+    pub fn new(m: Match, seq: i32, ctx: Context) -> Transaction {
         Transaction {
+            m: m,
             seq: seq,
             ctx: Arc::new(Mutex::new(ctx)),
             applied: vec![],
         }
     }
 
-    pub fn apply(&mut self, m: &Match) -> Result<Vec<Action>> {
-        for action in &m.actions {
-            self.apply_action(&action)?;
+    pub fn apply(&mut self) -> Result<Vec<Action>> {
+        let actions = self.m.actions.clone();
+        let mut applied: Vec<Action> = vec![];
+        for action in actions {
+            let mut resulting_actions = match action {
+                Action::SetVar(ref k, ref v) => {
+                    let mut ctx = self.ctx.lock().unwrap();
+                    ctx.set_var(k, Value::Str(v.to_string()));
+                    vec![action.clone()]
+                }
+                Action::UnsetVar(ref k) => {
+                    let mut ctx = self.ctx.lock().unwrap();
+                    ctx.unset_var(k);
+                    vec![action.clone()]
+                }
+                Action::Acknowledge(ref k) => {
+                    let mut ctx = self.ctx.lock().unwrap();
+                    ctx.ack_msg(k)?;
+                    vec![action.clone()]
+                }
+                Action::Script(ref contents) => self.exec_script(contents)?,
+            };
+            applied.append(&mut resulting_actions);
         }
-        Ok(self.applied.clone())
+        Ok(applied)
     }
 
-    pub fn eval(&self, cond: &Condition) -> bool {
+    pub fn eval(&self) -> bool {
+        self.m
+            .conditions
+            .iter()
+            .fold(true, |acc, c| acc && self.eval_condition(c))
+    }
+
+    fn eval_condition(&self, cond: &Condition) -> bool {
         let ctx = self.ctx.lock().unwrap();
         match cond {
             &Condition::Cmp(ref l, ref op, ref r) => {
@@ -46,34 +75,11 @@ impl Transaction {
         }
     }
 
-    pub fn with_context<F>(&mut self, f: F) -> Result<()>
-        where F: Fn(&mut Context) -> Result<()>
+    pub fn with_context<F, T>(&mut self, f: F) -> T
+        where F: Fn(&mut Context) -> T
     {
         let mut ctx = self.ctx.lock().unwrap();
         f(&mut ctx)
-    }
-
-    fn apply_action(&mut self, action: &Action) -> Result<()> {
-        let mut actions = match action {
-            &Action::SetVar(ref k, ref v) => {
-                let mut ctx = self.ctx.lock().unwrap();
-                ctx.set_var(k, Value::Str(v.to_string()));
-                vec![action.clone()]
-            }
-            &Action::UnsetVar(ref k) => {
-                let mut ctx = self.ctx.lock().unwrap();
-                ctx.unset_var(k);
-                vec![action.clone()]
-            }
-            &Action::Acknowledge(ref k) => {
-                let mut ctx = self.ctx.lock().unwrap();
-                ctx.ack_msg(k)?;
-                vec![action.clone()]
-            }
-            &Action::Script(ref contents) => self.exec_script(contents)?,
-        };
-        self.applied.append(&mut actions);
-        Ok(())
     }
 
     fn exec_script(&mut self, contents: &str) -> Result<Vec<Action>> {

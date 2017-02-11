@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use super::*;
 use value::{Value, Identifier};
 
+#[derive(Clone, Debug)]
 pub struct Match {
     pub conditions: Vec<Condition>,
     pub msg_topics: HashSet<String>,
@@ -36,6 +37,7 @@ impl Match {
     }
 }
 
+#[derive(Clone, Debug)]
 pub enum Condition {
     Cmp(Identifier, CmpOpcode, String),
     IsSet(Identifier),
@@ -54,6 +56,7 @@ impl Condition {
     }
 }
 
+#[derive(Clone, Debug)]
 pub enum CmpOpcode {
     Equal,
     NotEqual,
@@ -82,6 +85,7 @@ impl CmpOpcode {
     }
 }
 
+#[derive(Clone, Debug)]
 pub enum Action {
     SetVar(Identifier, String),
     UnsetVar(Identifier),
@@ -99,17 +103,6 @@ impl Action {
             &ast::Action::Acknowledge(ref topic) => Action::Acknowledge(topic.to_string()),
             &ast::Action::Script(ref contents) => Action::Script(contents.to_string()),
             _ => panic!(format!("action {} not implemented yet", a_ast)),
-        }
-    }
-}
-
-impl Clone for Action {
-    fn clone(&self) -> Action {
-        match self {
-            &Action::SetVar(ref k, ref v) => Action::SetVar(k.clone(), v.clone()),
-            &Action::UnsetVar(ref k) => Action::UnsetVar(k.clone()),
-            &Action::Acknowledge(ref v) => Action::Acknowledge(v.clone()),
-            &Action::Script(ref v) => Action::Script(v.clone()),
         }
     }
 }
