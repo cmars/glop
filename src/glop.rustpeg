@@ -51,8 +51,6 @@ actions -> Vec<Action>
 action -> Action
     = "set" __ k:identifier __ v:value __ ";" { Action::SetVar(k, v) }
     / "unset" __ k:identifier __ ";" { Action::UnsetVar(k) }
-    / "acknowledge" __ k:identifier __ ";" { Action::Acknowledge(k.join(".")) }
-    / "exec" __ v:$([^;]+) ";" { Action::Exec(String::from(v)) }
     / "script" __ v:$("#!" (!"!#" .)+) "!#" { Action::Script(String::from(v)) }
 
 /* The following is borrowed from rust-peg's own grammar */

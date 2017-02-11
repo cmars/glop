@@ -25,8 +25,6 @@ pub enum CmpOpcode {
 pub enum Action {
     SetVar(Identifier, String),
     UnsetVar(Identifier),
-    Acknowledge(String),
-    Exec(String),
     Script(String),
 }
 
@@ -37,8 +35,6 @@ impl fmt::Display for Action {
         match self {
             &Action::SetVar(ref k, ref v) => write!(f, "set {} {};", FmtIdentifier(k), v),
             &Action::UnsetVar(ref k) => write!(f, "unset {};", FmtIdentifier(k)),
-            &Action::Acknowledge(ref k) => write!(f, "acknowledge {};", k),
-            &Action::Exec(ref v) => write!(f, r#"exec {};"#, v),
             &Action::Script(ref v) => write!(f, r#"script {}!#"#, v),
         }
     }

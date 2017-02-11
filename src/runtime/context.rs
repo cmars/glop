@@ -46,11 +46,4 @@ impl Context {
     pub fn unset_var(&mut self, key: &Identifier) {
         key.unset(&mut self.vars)
     }
-
-    pub fn ack_msg(&mut self, topic: &str) -> Result<()> {
-        match self.msgs.remove(topic) {
-            Some(_) => Ok(()),
-            None => Err(Error::Acknowledge(topic.to_string())),
-        }
-    }
 }

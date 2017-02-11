@@ -89,7 +89,6 @@ impl CmpOpcode {
 pub enum Action {
     SetVar(Identifier, String),
     UnsetVar(Identifier),
-    Acknowledge(String),
     Script(String),
 }
 
@@ -100,9 +99,7 @@ impl Action {
                 Action::SetVar(Identifier::from_ast(k), v.to_string())
             }
             &ast::Action::UnsetVar(ref k) => Action::UnsetVar(Identifier::from_ast(k)),
-            &ast::Action::Acknowledge(ref topic) => Action::Acknowledge(topic.to_string()),
             &ast::Action::Script(ref contents) => Action::Script(contents.to_string()),
-            _ => panic!(format!("action {} not implemented yet", a_ast)),
         }
     }
 }

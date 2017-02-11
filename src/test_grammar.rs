@@ -7,11 +7,9 @@ fn round_trip_simple() {
     let src = r#"when (message init) {
     set installed false;
     set initialized true;
-    acknowledge init;
 }
 
 when (installed == false, initialized == true) {
-    exec install-things.bash;
     script #!/bin/bash
 set -ex
 echo "hello world"
@@ -20,11 +18,9 @@ echo "hello world"
 }
 
 when (message config, is_set initialized) {
-    acknowledge config;
 }
 
 when (message foo, initialized != baz) {
-    acknowledge foo;
     set has_foo true;
     unset bar;
 }
