@@ -1,10 +1,8 @@
 #![cfg(test)]
 
-use super::ast;
-use super::grammar;
-use super::runtime;
-use super::runtime::State;
-use super::value::{Identifier, Value};
+use super::*;
+use super::super::grammar;
+use self::value::{Identifier, Obj, Value};
 
 const SIMPLE_INIT: &'static str = r#"when (message init) { acknowledge init; }"#;
 const TWO_MSGS: &'static str =
@@ -22,8 +20,8 @@ fn parse_one_match(s: &str) -> ast::Match {
 #[test]
 fn unmatched_init_empty_state() {
     let m_ast = parse_one_match(SIMPLE_INIT);
-    let mut st = runtime::MemState::new();
-    let m_exc = runtime::Match::new_from_ast(&m_ast);
+    let mut st = MemState::new();
+    let m_exc = Match::new_from_ast(&m_ast);
     match st.eval(&m_exc) {
         Some(_) => panic!("unexpected match"),
         None => (),
@@ -33,9 +31,9 @@ fn unmatched_init_empty_state() {
 #[test]
 fn matched_init_message() {
     let m_ast = parse_one_match(SIMPLE_INIT);
-    let mut st = runtime::MemState::new();
-    st.push_msg("init", runtime::Msg::new());
-    let m_exc = runtime::Match::new_from_ast(&m_ast);
+    let mut st = MemState::new();
+    st.push_msg("init", Obj::new());
+    let m_exc = Match::new_from_ast(&m_ast);
     let actions = match st.eval(&m_exc) {
         Some(ref mut txn) => {
             assert_eq!(txn.seq, 0);
@@ -59,14 +57,14 @@ fn matched_init_message() {
 #[test]
 fn matched_only_init_message() {
     let m_ast = parse_one_match(SIMPLE_INIT);
-    let mut st = runtime::MemState::new();
-    st.push_msg("init", runtime::Msg::new());
+    let mut st = MemState::new();
+    st.push_msg("init", Obj::new());
     st.push_msg("blah",
                 [("foo".to_string(), Value::Str("bar".to_string()))]
                     .iter()
                     .cloned()
                     .collect());
-    let m_exc = runtime::Match::new_from_ast(&m_ast);
+    let m_exc = Match::new_from_ast(&m_ast);
     let actions = match st.eval(&m_exc) {
         Some(ref mut txn) => {
             assert_eq!(txn.seq, 0);
@@ -90,12 +88,12 @@ fn matched_only_init_message() {
 #[test]
 fn matched_two_messages() {
     let m_ast = parse_one_match(TWO_MSGS);
-    let mut st = runtime::MemState::new();
-    st.push_msg("foo", runtime::Msg::new());
-    st.push_msg("bar", runtime::Msg::new());
-    st.push_msg("foo", runtime::Msg::new());
-    st.push_msg("bar", runtime::Msg::new());
-    let m_exc = runtime::Match::new_from_ast(&m_ast);
+    let mut st = MemState::new();
+    st.push_msg("foo", Obj::new());
+    st.push_msg("bar", Obj::new());
+    st.push_msg("foo", Obj::new());
+    st.push_msg("bar", Obj::new());
+    let m_exc = Match::new_from_ast(&m_ast);
     for i in 0..2 {
         let actions = match st.eval(&m_exc) {
             Some(ref mut txn) => {
@@ -123,9 +121,9 @@ fn matched_two_messages() {
 fn match_equal() {
     let m_ast = parse_one_match(SIMPLE_EQUAL);
     {
-        let mut st = runtime::MemState::new();
+        let mut st = MemState::new();
         st.set_var(&Identifier::from_str("foo"), Value::from_str("bar"));
-        let m_exc = runtime::Match::new_from_ast(&m_ast);
+        let m_exc = Match::new_from_ast(&m_ast);
         let actions = match st.eval(&m_exc) {
             Some(ref mut txn) => {
                 assert_eq!(txn.seq, 0);
@@ -141,9 +139,9 @@ fn match_equal() {
         }
     }
     {
-        let mut st = runtime::MemState::new();
+        let mut st = MemState::new();
         st.set_var(&Identifier::from_str("foo"), Value::from_str("blah"));
-        let m_exc = runtime::Match::new_from_ast(&m_ast);
+        let m_exc = Match::new_from_ast(&m_ast);
         match st.eval(&m_exc) {
             Some(_) => panic!("unexpected match"),
             None => {}
@@ -155,9 +153,9 @@ fn match_equal() {
 fn match_not_equal() {
     let m_ast = parse_one_match(SIMPLE_NOT_EQUAL);
     {
-        let mut st = runtime::MemState::new();
+        let mut st = MemState::new();
         st.set_var(&Identifier::from_str("foo"), Value::from_str("blah"));
-        let m_exc = runtime::Match::new_from_ast(&m_ast);
+        let m_exc = Match::new_from_ast(&m_ast);
         match st.eval(&m_exc) {
             Some(ref mut txn) => {
                 assert_eq!(txn.seq, 0);
@@ -166,9 +164,9 @@ fn match_not_equal() {
         }
     }
     {
-        let mut st = runtime::MemState::new();
+        let mut st = MemState::new();
         st.set_var(&Identifier::from_str("foo"), Value::from_str("bar"));
-        let m_exc = runtime::Match::new_from_ast(&m_ast);
+        let m_exc = Match::new_from_ast(&m_ast);
         match st.eval(&m_exc) {
             Some(_) => panic!("unexpected match"),
             None => {}
@@ -178,9 +176,9 @@ fn match_not_equal() {
 
 #[test]
 fn simple_commit_progression() {
-    let m_exc_ne = runtime::Match::new_from_ast(&parse_one_match(SIMPLE_NOT_EQUAL));
-    let m_exc_eq = runtime::Match::new_from_ast(&parse_one_match(SIMPLE_EQUAL));
-    let mut st = runtime::MemState::new();
+    let m_exc_ne = Match::new_from_ast(&parse_one_match(SIMPLE_NOT_EQUAL));
+    let m_exc_eq = Match::new_from_ast(&parse_one_match(SIMPLE_EQUAL));
+    let mut st = MemState::new();
     st.set_var(&Identifier::from_str("foo"), Value::from_str("blah"));
     // foo starts out != bar so we expect a match and apply
     let actions = match st.eval(&m_exc_ne) {
@@ -211,9 +209,9 @@ fn simple_commit_progression() {
 fn match_is_set() {
     let m_ast = parse_one_match(SIMPLE_IS_SET);
     {
-        let mut st = runtime::MemState::new();
+        let mut st = MemState::new();
         st.set_var(&Identifier::from_str("foo"), Value::from_str("bar"));
-        let m_exc = runtime::Match::new_from_ast(&m_ast);
+        let m_exc = Match::new_from_ast(&m_ast);
         let actions = match st.eval(&m_exc) {
             Some(ref mut txn) => {
                 assert_eq!(txn.seq, 0);
@@ -228,9 +226,9 @@ fn match_is_set() {
         }
     }
     {
-        let mut st = runtime::MemState::new();
+        let mut st = MemState::new();
         st.set_var(&Identifier::from_str("bar"), Value::from_str("foo"));
-        let m_exc = runtime::Match::new_from_ast(&m_ast);
+        let m_exc = Match::new_from_ast(&m_ast);
         match st.eval(&m_exc) {
             Some(_) => panic!("unexpected match"),
             None => {}

@@ -157,7 +157,7 @@ impl<S: State> Agent<S> {
         })
     }
 
-    fn poll_matches(&mut self) -> futures::Poll<Option<()>, runtime::Error> {
+    fn poll_matches(&mut self) -> futures::Poll<Option<()>, Error> {
         let i = self.match_index % self.matches.len();
         let m = &self.matches[i];
         let actions = match self.st.eval(m) {
@@ -183,7 +183,7 @@ impl<S: State> Agent<S> {
 
 impl<S: State> futures::stream::Stream for Agent<S> {
     type Item = ();
-    type Error = runtime::Error;
+    type Error = Error;
 
     fn poll(&mut self) -> futures::Poll<Option<Self::Item>, Self::Error> {
         // TODO: poll mpsc channel (receiver end) for state changes & apply?
@@ -222,14 +222,13 @@ impl Service {
         }
     }
 
-    fn do_call(&self, req: Request) -> Result<Response, runtime::Error> {
+    fn do_call(&self, req: Request) -> Result<Response, Error> {
         let mut senders = self.senders.lock().unwrap();
         let res = match req {
             Request::Add { source: ref add_source, name: ref add_name } => {
                 let (sender, receiver) = mpsc::channel(10);
                 senders.insert(add_name.clone(), sender);
-                let agent = Agent::new_from_file(
-                    add_source, runtime::MemState::new(), receiver).map_err(runtime::Error::Base)?;
+                let agent = Agent::new_from_file(add_source, runtime::MemState::new(), receiver)?;
                 self.handle.spawn(self.pool
                     .spawn(agent.for_each(|_| Ok(()))
                         .or_else(|e| {

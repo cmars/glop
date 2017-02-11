@@ -24,7 +24,6 @@ use glop::grammar;
 use glop::runtime;
 use glop::runtime::State;
 use glop::signal_fix;
-use glop::script;
 use glop::value;
 
 type AppResult<T> = Result<T, Error>;
@@ -112,7 +111,7 @@ fn cmd_run<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let glop_contents = try!(read_file(glop_file));
     let glop = grammar::glop(&glop_contents).map_err(Error::Parse)?;
     let mut st = runtime::MemState::new();
-    st.push_msg("init", runtime::Msg::new());
+    st.push_msg("init", value::Obj::new());
     let m_excs =
         glop.matches.iter().map(|m_ast| runtime::Match::new_from_ast(&m_ast)).collect::<Vec<_>>();
     loop {
@@ -148,12 +147,12 @@ fn cmd_getvar<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let handle = core.handle();
     let addr_str = std::env::var("ADDR").map_err(Error::Env)?;
     let addr = addr_str.parse().map_err(Error::AddrParse)?;
-    let req = script::Request::GetVar { key: app_m.value_of("KEY").unwrap().to_string() };
-    let builder = TcpClient::new(script::ClientProto);
+    let req = runtime::ScriptRequest::GetVar { key: app_m.value_of("KEY").unwrap().to_string() };
+    let builder = TcpClient::new(runtime::ScriptClientProto);
     let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
         .map_err(Error::IO)?;
     match resp {
-        script::Response::GetVar { key: _, ref value } => {
+        runtime::ScriptResponse::GetVar { key: _, ref value } => {
             println!("{}", value);
             Ok(())
         }
@@ -166,15 +165,15 @@ fn cmd_setvar<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let handle = core.handle();
     let addr_str = std::env::var("ADDR").map_err(Error::Env)?;
     let addr = addr_str.parse().map_err(Error::AddrParse)?;
-    let req = script::Request::SetVar {
+    let req = runtime::ScriptRequest::SetVar {
         key: app_m.value_of("KEY").unwrap().to_string(),
         value: app_m.value_of("VALUE").unwrap().to_string(),
     };
-    let builder = TcpClient::new(script::ClientProto);
+    let builder = TcpClient::new(runtime::ScriptClientProto);
     let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
         .map_err(Error::IO)?;
     match resp {
-        script::Response::SetVar { key: _, value: _ } => Ok(()),
+        runtime::ScriptResponse::SetVar { key: _, value: _ } => Ok(()),
         _ => Err(Error::BadResponse),
     }
 }
@@ -184,15 +183,15 @@ fn cmd_getmsg<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let handle = core.handle();
     let addr_str = std::env::var("ADDR").map_err(Error::Env)?;
     let addr = addr_str.parse().map_err(Error::AddrParse)?;
-    let req = script::Request::GetMsg {
+    let req = runtime::ScriptRequest::GetMsg {
         topic: app_m.value_of("TOPIC").unwrap().to_string(),
         key: app_m.value_of("KEY").unwrap().to_string(),
     };
-    let builder = TcpClient::new(script::ClientProto);
+    let builder = TcpClient::new(runtime::ScriptClientProto);
     let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
         .map_err(Error::IO)?;
     match resp {
-        script::Response::GetMsg { topic: _, key: _, ref value } => {
+        runtime::ScriptResponse::GetMsg { topic: _, key: _, ref value } => {
             println!("{}", value);
             Ok(())
         }

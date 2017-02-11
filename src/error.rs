@@ -4,6 +4,8 @@ use std;
 
 use super::grammar;
 
+pub type Result<T> = std::result::Result<T, Error>;
+
 #[derive(Debug)]
 pub enum Error {
     AddrParse(std::net::AddrParseError),
@@ -14,6 +16,9 @@ pub enum Error {
     StringConversion(std::string::FromUtf8Error),
     InvalidArgument(String),
     BadResponse,
+    Exec(i32, String),
+    Acknowledge(String),
+    UnsupportedAction,
 }
 
 impl From<clap::Error> for Error {
@@ -63,6 +68,9 @@ impl std::fmt::Display for Error {
             Error::StringConversion(ref err) => err.fmt(f),
             Error::InvalidArgument(ref msg) => write!(f, "invalid argument: {}", msg),
             Error::BadResponse => write!(f, "bad response"),
+            Error::Exec(code, ref stderr) => write!(f, "script exit code {}: {}", code, stderr),
+            Error::Acknowledge(ref topic) => write!(f, "invalid acknowledge: {}", topic),
+            Error::UnsupportedAction => write!(f, "unsupported action"),
         }
     }
 }
@@ -78,6 +86,9 @@ impl std::error::Error for Error {
             Error::StringConversion(ref err) => err.description(),
             Error::InvalidArgument(ref msg) => msg,
             Error::BadResponse => "bad response",
+            Error::Exec(_, ref stderr) => stderr,
+            Error::Acknowledge(ref topic) => topic,
+            Error::UnsupportedAction => "unsupported action",
         }
     }
 

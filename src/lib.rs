@@ -10,11 +10,8 @@ pub mod grammar {
     include!(concat!(env!("OUT_DIR"), "/glop.rs"));
 }
 pub mod runtime;
-pub mod script;
 pub mod signal_fix;
 pub mod value;
 
 mod test_grammar;
-mod test_runtime;
-mod test_script;
 mod test_value;
