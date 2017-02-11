@@ -61,6 +61,47 @@ fn matched_init_message() {
 }
 
 #[test]
+fn rollback_msg() {
+    setup();
+    let m_ast = parse_one_match(SIMPLE_INIT);
+    let mut st = State::new(MemStorage::new());
+    st.mut_storage().push_msg("init", Obj::new()).unwrap();
+    let m_exc = Match::new_from_ast(&m_ast);
+    let txn = match st.eval(m_exc.clone()).unwrap() {
+        Some(mut txn) => {
+            assert_eq!(txn.seq, 0);
+            txn.with_context(|ctx| {
+                assert!(ctx.msgs.contains_key("init"));
+                assert_eq!(ctx.msgs.len(), 1);
+            });
+            txn
+        }
+        None => panic!("expected match"),
+    };
+    assert!(st.rollback(txn).is_ok());
+
+    // init message should have been nak'ed on rollback
+    let txn = match st.eval(m_exc.clone()).unwrap() {
+        Some(mut txn) => {
+            assert_eq!(txn.seq, 0);
+            txn.with_context(|ctx| {
+                assert!(ctx.msgs.contains_key("init"));
+                assert_eq!(ctx.msgs.len(), 1);
+            });
+            txn
+        }
+        None => panic!("expected match"),
+    };
+    assert!(st.commit(txn).is_ok());
+
+    // Now init message has been consumed.
+    match st.eval(m_exc.clone()).unwrap() {
+        Some(_) => panic!("unexpected match"),
+        None => {}
+    }
+}
+
+#[test]
 fn matched_only_init_message() {
     setup();
     let m_ast = parse_one_match(SIMPLE_INIT);
@@ -133,6 +174,48 @@ fn match_equal() {
         let mut st = State::new(MemStorage::new());
         st.mut_storage().mut_vars().insert("foo".to_string(), Value::from_str("bar"));
         let m_exc = Match::new_from_ast(&m_ast);
+        let txn = match st.eval(m_exc.clone()).unwrap() {
+            Some(txn) => {
+                assert_eq!(txn.seq, 0);
+                txn
+            }
+            None => panic!("expected match"),
+        };
+        assert!(st.commit(txn).is_ok());
+        // foo is now unset
+        match st.eval(m_exc.clone()).unwrap() {
+            Some(_) => panic!("unexpected match"),
+            None => {}
+        }
+    }
+    {
+        let mut st = State::new(MemStorage::new());
+        st.mut_storage().mut_vars().insert("foo".to_string(), Value::from_str("blah"));
+        let m_exc = Match::new_from_ast(&m_ast);
+        match st.eval(m_exc.clone()).unwrap() {
+            Some(_) => panic!("unexpected match"),
+            None => {}
+        }
+    }
+}
+
+#[test]
+fn rollback_vars() {
+    setup();
+    let m_ast = parse_one_match(SIMPLE_EQUAL);
+    {
+        let mut st = State::new(MemStorage::new());
+        st.mut_storage().mut_vars().insert("foo".to_string(), Value::from_str("bar"));
+        let m_exc = Match::new_from_ast(&m_ast);
+        let txn = match st.eval(m_exc.clone()).unwrap() {
+            Some(txn) => {
+                assert_eq!(txn.seq, 0);
+                txn
+            }
+            None => panic!("expected match"),
+        };
+        assert!(st.rollback(txn).is_ok());
+        // foo should be still set
         let txn = match st.eval(m_exc.clone()).unwrap() {
             Some(txn) => {
                 assert_eq!(txn.seq, 0);
