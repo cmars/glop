@@ -1,3 +1,4 @@
+extern crate fs2;
 extern crate futures;
 extern crate futures_cpupool;
 extern crate serde_json;
@@ -9,9 +10,10 @@ use std;
 use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::io::{Read, Write};
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::DirBuilderExt;
 use std::sync::{Arc, Mutex};
 
+use self::fs2::FileExt;
 use self::futures::{Future, Stream, Sink};
 use self::futures::sync::mpsc;
 use self::tokio_core::io::{Framed, Io};
@@ -207,14 +209,16 @@ pub struct Service {
     senders: Arc<Mutex<HashMap<String, mpsc::Sender<Envelope>>>>,
     handle: tokio_core::reactor::Handle,
     pool: futures_cpupool::CpuPool,
+    path: String,
 }
 
 impl Service {
-    pub fn new(h: &tokio_core::reactor::Handle) -> Service {
+    pub fn new(path: &str, h: &tokio_core::reactor::Handle) -> Service {
         Service {
             senders: Arc::new(Mutex::new(HashMap::new())),
             handle: h.clone(),
             pool: futures_cpupool::CpuPool::new_num_cpus(),
+            path: path.to_string(),
         }
     }
 
@@ -223,10 +227,18 @@ impl Service {
         let res = match req {
             Request::Add { source: ref add_source, name: ref add_name } => {
                 let (sender, receiver) = mpsc::channel(10);
-                senders.insert(add_name.clone(), sender);
-                let agent = Agent::new_from_file(add_source,
-                                                 runtime::State::new(runtime::MemStorage::new()),
-                                                 receiver)?;
+                if senders.contains_key(add_name) {
+                    return Err(Error::AgentExists(add_name.to_string()));
+                }
+                senders.insert(add_name.to_string(), sender);
+                let agent_path = std::path::PathBuf::from(&self.path)
+                    .join(add_name)
+                    .to_str()
+                    .unwrap()
+                    .to_string();
+                let storage = runtime::DurableStorage::new(&agent_path)?;
+                let agent =
+                    Agent::new_from_file(add_source, runtime::State::new(storage), receiver)?;
                 self.handle.spawn(self.pool
                     .spawn(agent.for_each(|_| Ok(()))
                         .or_else(|e| {
@@ -295,9 +307,10 @@ pub fn run_server() -> Result<(), std::io::Error> {
     let addr = "127.0.0.1:0".parse().unwrap();
     let listener = tokio_core::net::TcpListener::bind(&addr, &handle)?;
     let listen_addr = &listener.local_addr()?;
-    let _agent_file_cleanup = write_agent_addr(listen_addr)?;
+    let _lock = agent_lock(listen_addr)?;
     let connections = listener.incoming();
-    let service = Service::new(&handle);
+    let glop_dir = glop_dir()?;
+    let service = Service::new(&glop_dir, &handle);
     let server = connections.for_each(move |(socket, _peer_addr)| {
         let (wr, rd) = socket.framed(ServiceCodec).split();
         let service = service.clone();
@@ -314,39 +327,45 @@ pub fn run_server() -> Result<(), std::io::Error> {
     core.run(server)
 }
 
-fn write_agent_addr(addr: &std::net::SocketAddr) -> Result<cleanup::Cleanup, std::io::Error> {
-    let mut agent_path_buf = match std::env::home_dir() {
-        Some(home) => home,
-        None => {
-            return Err(std::io::Error::new(std::io::ErrorKind::Other,
-                                           "cannot determine home directory"))
-        }
-    };
-    agent_path_buf.push(".glop.agent");
-    let agent_path = agent_path_buf.to_str().unwrap();
-    let cleanup = cleanup::Cleanup::File(agent_path.to_string());
-    {
-        let mut agent_file = std::fs::OpenOptions::new().write(true)
-            .mode(0o600)
-            .create_new(true)
-            .open(agent_path)?;
-        write!(agent_file, "{}", addr)?;
-    }
-    Ok(cleanup)
-}
-
 pub fn read_agent_addr() -> std::io::Result<String> {
-    let mut agent_path_buf = match std::env::home_dir() {
-        Some(home) => home,
-        None => {
-            return Err(std::io::Error::new(std::io::ErrorKind::Other,
-                                           "cannot determine home directory"))
-        }
-    };
-    agent_path_buf.push(".glop.agent");
-    let agent_path = agent_path_buf.to_str().unwrap();
-    let mut agent_file = std::fs::File::open(agent_path)?;
+    let lock_path = agent_lock_path()?;
+    let mut agent_file = std::fs::File::open(lock_path)?;
     let mut result = String::new();
     agent_file.read_to_string(&mut result)?;
     Ok(result)
+}
+
+fn agent_lock(addr: &std::net::SocketAddr) -> std::io::Result<cleanup::Cleanup> {
+    let lock_path = agent_lock_path()?;
+    let mut f = std::fs::OpenOptions::new().read(true).write(true).create(true).open(&lock_path)?;
+    f.try_lock_exclusive()?;
+    write!(f, "{}", addr)?;
+    f.flush()?;
+    Ok(cleanup::Cleanup::Lock(f, lock_path))
+}
+
+fn glop_dir() -> std::io::Result<String> {
+    let mut path_buf = match std::env::home_dir() {
+        Some(home) => home,
+        None => {
+            return Err(std::io::Error::new(std::io::ErrorKind::Other,
+                                           "cannot determine home directory"))
+        }
+    };
+    path_buf.push(".glop");
+    let path = path_buf.to_str().unwrap().to_string();
+    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&path)?;
+    Ok(path)
+}
+
+fn agent_lock_path() -> std::io::Result<String> {
+    let mut path_buf = match std::env::home_dir() {
+        Some(home) => home,
+        None => {
+            return Err(std::io::Error::new(std::io::ErrorKind::Other,
+                                           "cannot determine home directory"))
+        }
+    };
+    path_buf.push(".glop.agent");
+    Ok(path_buf.to_str().unwrap().to_string())
 }

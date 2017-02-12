@@ -11,11 +11,12 @@ build = "build.rs"
 peg = { version = "0.4" }
 
 [dependencies]
-clap = "2.19.3"
+clap = "2.19"
 env_logger = "*"
+fs2 = "0.4"
 futures = "0.1"
 futures-cpupool = "0.1"
-log = "0.3.6"
+log = "0.3"
 serde = "0.9"
 serde_derive = "0.9"
 serde_json = "0.9"

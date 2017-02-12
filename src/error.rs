@@ -19,6 +19,7 @@ pub enum Error {
     Exec(i32, String),
     Acknowledge(String),
     UnsupportedAction,
+    AgentExists(String),
 }
 
 impl From<clap::Error> for Error {
@@ -71,6 +72,7 @@ impl std::fmt::Display for Error {
             Error::Exec(code, ref stderr) => write!(f, "script exit code {}: {}", code, stderr),
             Error::Acknowledge(ref topic) => write!(f, "invalid acknowledge: {}", topic),
             Error::UnsupportedAction => write!(f, "unsupported action"),
+            Error::AgentExists(ref name) => write!(f, "agent {} already added", name),
         }
     }
 }
@@ -89,6 +91,7 @@ impl std::error::Error for Error {
             Error::Exec(_, ref stderr) => stderr,
             Error::Acknowledge(ref topic) => topic,
             Error::UnsupportedAction => "unsupported action",
+            Error::AgentExists(ref name) => name,
         }
     }
 
