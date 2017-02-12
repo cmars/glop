@@ -2,7 +2,6 @@ use std;
 use std::collections::HashMap;
 use std::process::Command;
 
-use super::*;
 use super::value::{Identifier, Obj, Value};
 
 pub struct Context {
