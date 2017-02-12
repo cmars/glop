@@ -1,6 +1,9 @@
 #![cfg(test)]
 
 extern crate env_logger;
+extern crate textnonce;
+
+use std;
 
 use super::*;
 use super::super::grammar;
@@ -22,11 +25,40 @@ fn parse_one_match(s: &str) -> ast::Match {
     g.matches.pop().unwrap()
 }
 
+fn mem_state() -> (State<MemStorage>, cleanup::Cleanup) {
+    (State::new(MemStorage::new()), cleanup::Cleanup::Empty)
+}
+
+fn durable_state() -> (State<DurableStorage>, cleanup::Cleanup) {
+    let mut storage_path_buf = std::env::temp_dir();
+    storage_path_buf.push(rand_string());
+    let storage_path = storage_path_buf.to_str().unwrap();
+    let cl = cleanup::Cleanup::Dir(storage_path.to_string());
+    let storage = DurableStorage::new(storage_path).unwrap();
+    (State::new(storage), cl)
+}
+
+fn rand_string() -> String {
+    textnonce::TextNonce::sized_urlsafe(32).unwrap().into_string()
+}
+
+type StateFactory<T> = fn() -> (State<T>, cleanup::Cleanup);
+
 #[test]
-fn unmatched_init_empty_state() {
+fn mem_unmatched_init_empty_state() {
+    unmatched_init_empty_state(mem_state)
+}
+
+#[test]
+fn durable_unmatched_init_empty_state() {
+    unmatched_init_empty_state(durable_state)
+}
+
+fn unmatched_init_empty_state<T: Storage>(f: StateFactory<T>) {
     setup();
+    let (st, _cleanup) = f();
+    let mut st = st;
     let m_ast = parse_one_match(SIMPLE_INIT);
-    let mut st = State::new(MemStorage::new());
     let m_exc = Match::new_from_ast(&m_ast);
     match st.eval(m_exc).unwrap() {
         Some(_) => panic!("unexpected match"),
@@ -35,10 +67,20 @@ fn unmatched_init_empty_state() {
 }
 
 #[test]
-fn matched_init_message() {
+fn mem_matched_init_message() {
+    matched_init_message(mem_state)
+}
+
+#[test]
+fn durable_matched_init_message() {
+    matched_init_message(durable_state)
+}
+
+fn matched_init_message<T: Storage>(f: StateFactory<T>) {
     setup();
+    let (st, _cleanup) = f();
+    let mut st = st;
     let m_ast = parse_one_match(SIMPLE_INIT);
-    let mut st = State::new(MemStorage::new());
     st.mut_storage().push_msg("init", Obj::new()).unwrap();
     let m_exc = Match::new_from_ast(&m_ast);
     let txn = match st.eval(m_exc.clone()).unwrap() {
@@ -61,10 +103,20 @@ fn matched_init_message() {
 }
 
 #[test]
-fn rollback_msg() {
+fn mem_rollback_msg() {
+    rollback_msg(mem_state)
+}
+
+#[test]
+fn durable_rollback_msg() {
+    rollback_msg(durable_state)
+}
+
+fn rollback_msg<T: Storage>(f: StateFactory<T>) {
     setup();
+    let (st, _cleanup) = f();
+    let mut st = st;
     let m_ast = parse_one_match(SIMPLE_INIT);
-    let mut st = State::new(MemStorage::new());
     st.mut_storage().push_msg("init", Obj::new()).unwrap();
     let m_exc = Match::new_from_ast(&m_ast);
     let txn = match st.eval(m_exc.clone()).unwrap() {
@@ -102,10 +154,20 @@ fn rollback_msg() {
 }
 
 #[test]
-fn matched_only_init_message() {
+fn mem_matched_only_init_message() {
+    matched_only_init_message(mem_state)
+}
+
+#[test]
+fn durable_matched_only_init_message() {
+    matched_only_init_message(durable_state)
+}
+
+fn matched_only_init_message<T: Storage>(f: StateFactory<T>) {
     setup();
+    let (st, _cleanup) = f();
+    let mut st = st;
     let m_ast = parse_one_match(SIMPLE_INIT);
-    let mut st = State::new(MemStorage::new());
     st.mut_storage().push_msg("init", Obj::new()).unwrap();
     st.mut_storage()
         .push_msg("blah",
@@ -135,10 +197,20 @@ fn matched_only_init_message() {
 }
 
 #[test]
-fn matched_two_messages() {
+fn mem_matched_two_messages() {
+    matched_two_messages(mem_state)
+}
+
+#[test]
+fn durable_matched_two_messages() {
+    matched_two_messages(durable_state)
+}
+
+fn matched_two_messages<T: Storage>(f: StateFactory<T>) {
     setup();
+    let (st, _cleanup) = f();
+    let mut st = st;
     let m_ast = parse_one_match(TWO_MSGS);
-    let mut st = State::new(MemStorage::new());
     st.mut_storage().push_msg("foo", Obj::new()).unwrap();
     st.mut_storage().push_msg("bar", Obj::new()).unwrap();
     st.mut_storage().push_msg("foo", Obj::new()).unwrap();
@@ -167,16 +239,29 @@ fn matched_two_messages() {
 }
 
 #[test]
-fn match_equal() {
+fn mem_match_equal() {
+    match_equal(mem_state)
+}
+
+#[test]
+fn durable_match_equal() {
+    match_equal(durable_state)
+}
+
+fn match_equal<T: Storage>(f: StateFactory<T>) {
     setup();
     let m_ast = parse_one_match(SIMPLE_EQUAL);
     {
-        let mut st = State::new(MemStorage::new());
-        st.mut_storage().mut_vars().insert("foo".to_string(), Value::from_str("bar"));
+        let (st, _cleanup) = f();
+        let mut st = st;
+        st.mut_storage()
+            .save(0,
+                  [("foo".to_string(), Value::from_str("bar"))].iter().cloned().collect())
+            .unwrap();
         let m_exc = Match::new_from_ast(&m_ast);
         let txn = match st.eval(m_exc.clone()).unwrap() {
             Some(txn) => {
-                assert_eq!(txn.seq, 0);
+                assert_eq!(txn.seq, 1);
                 txn
             }
             None => panic!("expected match"),
@@ -189,8 +274,12 @@ fn match_equal() {
         }
     }
     {
-        let mut st = State::new(MemStorage::new());
-        st.mut_storage().mut_vars().insert("foo".to_string(), Value::from_str("blah"));
+        let (st, _cleanup) = f();
+        let mut st = st;
+        st.mut_storage()
+            .save(0,
+                  [("foo".to_string(), Value::from_str("blah"))].iter().cloned().collect())
+            .unwrap();
         let m_exc = Match::new_from_ast(&m_ast);
         match st.eval(m_exc.clone()).unwrap() {
             Some(_) => panic!("unexpected match"),
@@ -200,65 +289,86 @@ fn match_equal() {
 }
 
 #[test]
-fn rollback_vars() {
+fn mem_rollback_vars() {
+    rollback_vars(mem_state)
+}
+
+#[test]
+fn durable_rollback_vars() {
+    rollback_vars(durable_state)
+}
+
+fn rollback_vars<T: Storage>(f: StateFactory<T>) {
     setup();
+    let (st, _cleanup) = f();
+    let mut st = st;
+    st.mut_storage()
+        .save(0,
+              [("foo".to_string(), Value::from_str("bar"))].iter().cloned().collect())
+        .unwrap();
     let m_ast = parse_one_match(SIMPLE_EQUAL);
-    {
-        let mut st = State::new(MemStorage::new());
-        st.mut_storage().mut_vars().insert("foo".to_string(), Value::from_str("bar"));
-        let m_exc = Match::new_from_ast(&m_ast);
-        let txn = match st.eval(m_exc.clone()).unwrap() {
-            Some(txn) => {
-                assert_eq!(txn.seq, 0);
-                txn
-            }
-            None => panic!("expected match"),
-        };
-        assert!(st.rollback(txn).is_ok());
-        // foo should be still set
-        let txn = match st.eval(m_exc.clone()).unwrap() {
-            Some(txn) => {
-                assert_eq!(txn.seq, 0);
-                txn
-            }
-            None => panic!("expected match"),
-        };
-        assert!(st.commit(txn).is_ok());
-        // foo is now unset
-        match st.eval(m_exc.clone()).unwrap() {
-            Some(_) => panic!("unexpected match"),
-            None => {}
+    let m_exc = Match::new_from_ast(&m_ast);
+    let txn = match st.eval(m_exc.clone()).unwrap() {
+        Some(txn) => {
+            assert_eq!(txn.seq, 1);
+            txn
         }
-    }
-    {
-        let mut st = State::new(MemStorage::new());
-        st.mut_storage().mut_vars().insert("foo".to_string(), Value::from_str("blah"));
-        let m_exc = Match::new_from_ast(&m_ast);
-        match st.eval(m_exc.clone()).unwrap() {
-            Some(_) => panic!("unexpected match"),
-            None => {}
+        None => panic!("expected match"),
+    };
+    debug!(target: "rollback_vars", "BEGIN rollback");
+    assert!(st.rollback(txn).is_ok());
+    debug!(target: "rollback_vars", "OK rollback");
+    // foo should be still set
+    let txn = match st.eval(m_exc.clone()).unwrap() {
+        Some(txn) => {
+            assert_eq!(txn.seq, 1);
+            txn
         }
+        None => panic!("expected match"),
+    };
+    assert!(st.commit(txn).is_ok());
+    // foo is now unset
+    match st.eval(m_exc.clone()).unwrap() {
+        Some(_) => panic!("unexpected match"),
+        None => {}
     }
 }
 
 #[test]
-fn match_not_equal() {
+fn mem_match_not_equal() {
+    match_not_equal(mem_state)
+}
+
+#[test]
+fn durable_match_not_equal() {
+    match_not_equal(durable_state)
+}
+
+fn match_not_equal<T: Storage>(f: StateFactory<T>) {
     setup();
     let m_ast = parse_one_match(SIMPLE_NOT_EQUAL);
     {
-        let mut st = State::new(MemStorage::new());
-        st.mut_storage().mut_vars().insert("foo".to_string(), Value::from_str("blah"));
+        let (st, _cleanup) = f();
+        let mut st = st;
+        st.mut_storage()
+            .save(0,
+                  [("foo".to_string(), Value::from_str("blah"))].iter().cloned().collect())
+            .unwrap();
         let m_exc = Match::new_from_ast(&m_ast);
         match st.eval(m_exc.clone()).unwrap() {
             Some(txn) => {
-                assert_eq!(txn.seq, 0);
+                assert_eq!(txn.seq, 1);
             }
             None => panic!("expected match"),
         }
     }
     {
-        let mut st = State::new(MemStorage::new());
-        st.mut_storage().mut_vars().insert("foo".to_string(), Value::from_str("bar"));
+        let (st, _cleanup) = f();
+        let mut st = st;
+        st.mut_storage()
+            .save(0,
+                  [("foo".to_string(), Value::from_str("bar"))].iter().cloned().collect())
+            .unwrap();
         let m_exc = Match::new_from_ast(&m_ast);
         match st.eval(m_exc.clone()).unwrap() {
             Some(_) => panic!("unexpected match"),
@@ -268,16 +378,29 @@ fn match_not_equal() {
 }
 
 #[test]
-fn simple_commit_progression() {
+fn mem_simple_commit_progression() {
+    simple_commit_progression(mem_state)
+}
+
+#[test]
+fn durable_simple_commit_progression() {
+    simple_commit_progression(durable_state)
+}
+
+fn simple_commit_progression<T: Storage>(f: StateFactory<T>) {
     setup();
     let m_exc_ne = Match::new_from_ast(&parse_one_match(SIMPLE_NOT_EQUAL));
     let m_exc_eq = Match::new_from_ast(&parse_one_match(SIMPLE_EQUAL));
-    let mut st = State::new(MemStorage::new());
-    st.mut_storage().mut_vars().insert("foo".to_string(), Value::from_str("blah"));
+    let (st, _cleanup) = f();
+    let mut st = st;
+    st.mut_storage()
+        .save(0,
+              [("foo".to_string(), Value::from_str("blah"))].iter().cloned().collect())
+        .unwrap();
     // foo starts out != bar so we expect a match and apply
     let txn = match st.eval(m_exc_ne.clone()).unwrap() {
         Some(txn) => {
-            assert_eq!(txn.seq, 0);
+            assert_eq!(txn.seq, 1);
             txn
         }
         None => panic!("expected match"),
@@ -292,7 +415,7 @@ fn simple_commit_progression() {
     // now let's match on foo == bar, should match committed state now
     let txn = match st.eval(m_exc_eq.clone()).unwrap() {
         Some(txn) => {
-            assert_eq!(txn.seq, 1);
+            assert_eq!(txn.seq, 2);
             txn
         }
         None => panic!("expected match"),
@@ -301,16 +424,29 @@ fn simple_commit_progression() {
 }
 
 #[test]
-fn match_is_set() {
+fn mem_match_is_set() {
+    match_is_set(mem_state)
+}
+
+#[test]
+fn durable_match_is_set() {
+    match_is_set(durable_state)
+}
+
+fn match_is_set<T: Storage>(f: StateFactory<T>) {
     setup();
     let m_ast = parse_one_match(SIMPLE_IS_SET);
     {
-        let mut st = State::new(MemStorage::new());
-        st.mut_storage().mut_vars().insert("foo".to_string(), Value::from_str("bar"));
+        let (st, _cleanup) = f();
+        let mut st = st;
+        st.mut_storage()
+            .save(0,
+                  [("foo".to_string(), Value::from_str("bar"))].iter().cloned().collect())
+            .unwrap();
         let m_exc = Match::new_from_ast(&m_ast);
         let txn = match st.eval(m_exc.clone()).unwrap() {
             Some(txn) => {
-                assert_eq!(txn.seq, 0);
+                assert_eq!(txn.seq, 1);
                 txn
             }
             None => panic!("expected match"),
@@ -323,8 +459,12 @@ fn match_is_set() {
         }
     }
     {
-        let mut st = State::new(MemStorage::new());
-        st.mut_storage().mut_vars().insert("bar".to_string(), Value::from_str("foo"));
+        let (st, _cleanup) = f();
+        let mut st = st;
+        st.mut_storage()
+            .save(0,
+                  [("bar".to_string(), Value::from_str("foo"))].iter().cloned().collect())
+            .unwrap();
         let m_exc = Match::new_from_ast(&m_ast);
         match st.eval(m_exc.clone()).unwrap() {
             Some(_) => panic!("unexpected match"),
