@@ -22,7 +22,7 @@ impl Drop for Cleanup {
                 match std::fs::remove_file(path) {
                     Ok(_) => {}
                     Err(e) => {
-                        println!("warning: failed to remove file {}: {}", path, e);
+                        warn!("failed to remove file {}: {}", path, e);
                     }
                 }
             }
@@ -30,7 +30,7 @@ impl Drop for Cleanup {
                 match std::fs::remove_dir_all(path) {
                     Ok(_) => {}
                     Err(e) => {
-                        println!("warning: failed to remove file {}: {}", path, e);
+                        warn!("failed to remove file {}: {}", path, e);
                     }
                 }
             }
@@ -38,13 +38,13 @@ impl Drop for Cleanup {
                 match f.unlock() {
                     Ok(_) => {}
                     Err(e) => {
-                        println!("warning: failed to unlock file {}: {}", path, e);
+                        warn!("failed to unlock file {}: {}", path, e);
                     }
                 }
                 match std::fs::remove_file(path) {
                     Ok(_) => {}
                     Err(e) => {
-                        println!("warning: failed to remove file {}: {}", path, e);
+                        warn!("failed to remove file {}: {}", path, e);
                     }
                 }
             }

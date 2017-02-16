@@ -23,6 +23,7 @@ pub struct ClientCodec;
 pub struct ServiceCodec;
 
 #[derive(Serialize, Deserialize)]
+#[derive(Debug)]
 pub enum Request {
     GetVar { key: String },
     SetVar { key: String, value: String },
@@ -30,6 +31,7 @@ pub enum Request {
 }
 
 #[derive(Serialize, Deserialize)]
+#[derive(Debug)]
 pub enum Response {
     GetVar { key: String, value: String },
     SetVar { key: String, value: String },
@@ -57,9 +59,12 @@ impl Codec for ServiceCodec {
             let maybe_req: std::result::Result<Self::In, serde_json::error::Error> =
                 serde_json::from_slice(line.as_slice());
             match maybe_req {
-                Ok(req) => Ok(Some(req)),
+                Ok(req) => {
+                    debug!("service decode {:?}", req);
+                    Ok(Some(req))
+                }
                 Err(e) => {
-                    println!("decode failed: {}", e);
+                    error!("decode failed: {}", e);
                     Err(std::io::Error::new(std::io::ErrorKind::Other, e.description()))
                 }
             }
@@ -70,8 +75,14 @@ impl Codec for ServiceCodec {
 
     fn encode(&mut self, msg: Self::Out, buf: &mut Vec<u8>) -> std::io::Result<()> {
         match serde_json::to_writer(buf, &msg) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e.description())),
+            Ok(_) => {
+                debug!("service encode {:?}", msg);
+                Ok(())
+            }
+            Err(e) => {
+                error!("service encode failed: {}", e);
+                Err(std::io::Error::new(std::io::ErrorKind::Other, e.description()))
+            }
         }?;
         buf.push(b'\n');
         Ok(())
@@ -95,9 +106,12 @@ impl Codec for ClientCodec {
             let maybe_req: std::result::Result<Self::In, serde_json::error::Error> =
                 serde_json::from_slice(line.as_slice());
             match maybe_req {
-                Ok(req) => Ok(Some(req)),
+                Ok(req) => {
+                    debug!("client decode {:?}", req);
+                    Ok(Some(req))
+                }
                 Err(e) => {
-                    println!("decode failed: {}", e);
+                    error!("client decode failed: {}", e);
                     Err(std::io::Error::new(std::io::ErrorKind::Other, e.description()))
                 }
             }
@@ -108,8 +122,14 @@ impl Codec for ClientCodec {
 
     fn encode(&mut self, msg: Self::Out, buf: &mut Vec<u8>) -> std::io::Result<()> {
         match serde_json::to_writer(buf, &msg) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e.description())),
+            Ok(_) => {
+                debug!("client encode {:?}", msg);
+                Ok(())
+            }
+            Err(e) => {
+                error!("client encode failed: {}", e);
+                Err(std::io::Error::new(std::io::ErrorKind::Other, e.description()))
+            }
         }?;
         buf.push(b'\n');
         Ok(())
@@ -231,15 +251,18 @@ pub fn run_script(ctx: Arc<Mutex<Context>>, script_path: &str) -> Result<Vec<Act
             match result {
                 Ok(output) => {
                     if output.status.success() {
-                        print!("stdout: {}", String::from_utf8(output.stdout).unwrap());
+                        let mut stdout = String::from_utf8(output.stdout).unwrap();
+                        stdout.pop();
+                        info!("stdout: {}", stdout);
                         Ok(())
                     } else {
                         let code = match output.status.code() {
                             Some(value) => value,
                             None => 0,
                         };
-                        let stderr = String::from_utf8(output.stderr).unwrap();
-                        print!("stderr: {}", stderr);
+                        let mut stderr = String::from_utf8(output.stderr).unwrap();
+                        stderr.pop();
+                        info!("stderr: {}", stderr);
                         Err(Error::Exec(code, stderr))
                     }
                 }

@@ -15,9 +15,9 @@ pub enum Error {
     Parse(grammar::ParseError),
     StringConversion(std::string::FromUtf8Error),
     InvalidArgument(String),
+    ErrorResponse(String),
     BadResponse,
     Exec(i32, String),
-    Acknowledge(String),
     UnsupportedAction,
     AgentExists(String),
 }
@@ -69,8 +69,8 @@ impl std::fmt::Display for Error {
             Error::StringConversion(ref err) => err.fmt(f),
             Error::InvalidArgument(ref msg) => write!(f, "invalid argument: {}", msg),
             Error::BadResponse => write!(f, "bad response"),
+            Error::ErrorResponse(ref msg) => write!(f, "{}", msg),
             Error::Exec(code, ref stderr) => write!(f, "script exit code {}: {}", code, stderr),
-            Error::Acknowledge(ref topic) => write!(f, "invalid acknowledge: {}", topic),
             Error::UnsupportedAction => write!(f, "unsupported action"),
             Error::AgentExists(ref name) => write!(f, "agent {} already added", name),
         }
@@ -88,8 +88,8 @@ impl std::error::Error for Error {
             Error::StringConversion(ref err) => err.description(),
             Error::InvalidArgument(ref msg) => msg,
             Error::BadResponse => "bad response",
+            Error::ErrorResponse(ref msg) => msg,
             Error::Exec(_, ref stderr) => stderr,
-            Error::Acknowledge(ref topic) => topic,
             Error::UnsupportedAction => "unsupported action",
             Error::AgentExists(ref name) => name,
         }

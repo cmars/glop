@@ -27,6 +27,7 @@ use super::runtime::Storage;
 use super::value::Obj;
 
 #[derive(Serialize, Deserialize)]
+#[derive(Debug)]
 pub enum Request {
     Add { source: String, name: String },
     Remove { name: String },
@@ -36,12 +37,14 @@ pub enum Request {
 }
 
 #[derive(Serialize, Deserialize)]
+#[derive(Debug)]
 pub enum Response {
     Add,
     Remove,
     List { names: Vec<String> },
     SendTo, /* RecvFrom { topic: String, contents: Obj },
              * Introduce, */
+    Error(String),
 }
 
 pub struct ClientCodec;
@@ -64,9 +67,12 @@ impl tokio_core::io::Codec for ServiceCodec {
             let maybe_req: Result<Self::In, serde_json::error::Error> =
                 serde_json::from_slice(line.as_slice());
             match maybe_req {
-                Ok(req) => Ok(Some(req)),
+                Ok(req) => {
+                    trace!("service decode {:?}", req);
+                    Ok(Some(req))
+                }
                 Err(e) => {
-                    println!("decode failed: {}", e);
+                    error!("service decode failed: {}", e);
                     Err(std::io::Error::new(std::io::ErrorKind::Other, e.description()))
                 }
             }
@@ -77,8 +83,14 @@ impl tokio_core::io::Codec for ServiceCodec {
 
     fn encode(&mut self, msg: Self::Out, buf: &mut Vec<u8>) -> std::io::Result<()> {
         match serde_json::to_writer(buf, &msg) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e.description())),
+            Ok(_) => {
+                trace!("service encode {:?}", msg);
+                Ok(())
+            }
+            Err(e) => {
+                error!("service encode failed: {}", e);
+                Err(std::io::Error::new(std::io::ErrorKind::Other, e.description()))
+            }
         }?;
         buf.push(b'\n');
         Ok(())
@@ -102,9 +114,12 @@ impl tokio_core::io::Codec for ClientCodec {
             let maybe_req: Result<Self::In, serde_json::error::Error> =
                 serde_json::from_slice(line.as_slice());
             match maybe_req {
-                Ok(req) => Ok(Some(req)),
+                Ok(req) => {
+                    debug!("client decode: {:?}", req);
+                    Ok(Some(req))
+                }
                 Err(e) => {
-                    println!("decode failed: {}", e);
+                    error!("client decode failed: {}", e);
                     Err(std::io::Error::new(std::io::ErrorKind::Other, e.description()))
                 }
             }
@@ -115,8 +130,14 @@ impl tokio_core::io::Codec for ClientCodec {
 
     fn encode(&mut self, msg: Self::Out, buf: &mut Vec<u8>) -> std::io::Result<()> {
         match serde_json::to_writer(buf, &msg) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e.description())),
+            Ok(_) => {
+                debug!("client encode: {:?}", msg);
+                Ok(())
+            }
+            Err(e) => {
+                error!("client encode failed: {}", e);
+                Err(std::io::Error::new(std::io::ErrorKind::Other, e.description()))
+            }
         }?;
         buf.push(b'\n');
         Ok(())
@@ -124,6 +145,7 @@ impl tokio_core::io::Codec for ClientCodec {
 }
 
 #[derive(Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct Envelope {
     // src: String,
     pub dst: String,
@@ -146,7 +168,9 @@ impl<S: Storage> Agent<S> {
         let glop_contents = read_file(path)?;
         let glop = grammar::glop(&glop_contents).map_err(Error::Parse)?;
         let mut st = st;
-        st.mut_storage().push_msg("init", Obj::new())?;
+        if st.storage().seq() == 0 {
+            st.mut_storage().push_msg("init", Obj::new())?;
+        }
         let m_excs = glop.matches
             .iter()
             .map(|m_ast| runtime::Match::new_from_ast(&m_ast))
@@ -162,18 +186,25 @@ impl<S: Storage> Agent<S> {
     fn poll_matches(&mut self) -> futures::Poll<Option<()>, Error> {
         let i = self.match_index % self.matches.len();
         let m = &self.matches[i];
-        let txn = match self.st.eval(m.clone()) {
-            Ok(Some(txn)) => txn,
-            Ok(None) => return Ok(futures::Async::NotReady),
-            Err(e) => return Err(e),
-        };
         // TODO: intelligent selection of next match?
         self.match_index = self.match_index + 1;
+        let mut txn = match self.st.eval(m.clone()) {
+            Ok(Some(txn)) => txn,
+            Ok(None) => return Ok(futures::Async::Ready(Some(()))),
+            Err(e) => return Err(e),
+        };
         // TODO: graceful agent termination (nothing left to do)?
-        match self.st.commit(txn) {
-            Ok(_) => Ok(futures::Async::Ready(Some(()))),
-            Err(e) => Err(e),
+        let result = self.st.commit(&mut txn);
+        match result {
+            Ok(_) => {}
+            Err(_) => {
+                match self.st.rollback(txn) {
+                    Ok(_) => {}
+                    Err(e) => return Err(e),
+                }
+            }
         }
+        Ok(futures::Async::Ready(Some(())))
     }
 }
 
@@ -224,11 +255,12 @@ impl Service {
 
     fn do_call(&self, req: Request) -> Result<Response, Error> {
         let mut senders = self.senders.lock().unwrap();
+        debug!("request {:?}", &req);
         let res = match req {
             Request::Add { source: ref add_source, name: ref add_name } => {
                 let (sender, receiver) = mpsc::channel(10);
                 if senders.contains_key(add_name) {
-                    return Err(Error::AgentExists(add_name.to_string()));
+                    return Ok(Response::Error(format!("agent {} already added", add_name)));
                 }
                 senders.insert(add_name.to_string(), sender);
                 let agent_path = std::path::PathBuf::from(&self.path)
@@ -242,7 +274,7 @@ impl Service {
                 self.handle.spawn(self.pool
                     .spawn(agent.for_each(|_| Ok(()))
                         .or_else(|e| {
-                            println!("{}", e);
+                            error!("{}", e);
                             Err(e)
                         })
                         .then(|_| Ok(()))));
@@ -256,7 +288,7 @@ impl Service {
             Request::SendTo(env) => {
                 let sender = match senders.get(&env.dst) {
                     Some(s) => s.clone(),
-                    None => return Ok(Response::SendTo), // TODO: handle unmatched dst
+                    None => return Ok(Response::Error(format!("agent {} not found", &env.dst))),
                 };
                 self.handle.spawn(sender.send(env).then(|_| Ok(())));
                 Response::SendTo
@@ -264,6 +296,7 @@ impl Service {
             // RecvFrom { handle: String },
             // Introduce { names: Vec<String> },
         };
+        debug!("response {:?}", res);
         Ok(res)
     }
 }
@@ -307,9 +340,11 @@ pub fn run_server() -> Result<(), std::io::Error> {
     let addr = "127.0.0.1:0".parse().unwrap();
     let listener = tokio_core::net::TcpListener::bind(&addr, &handle)?;
     let listen_addr = &listener.local_addr()?;
+    info!("server listening on {}", &listen_addr);
     let _lock = agent_lock(listen_addr)?;
     let connections = listener.incoming();
     let glop_dir = glop_dir()?;
+    debug!("glop_dir={}", glop_dir);
     let service = Service::new(&glop_dir, &handle);
     let server = connections.for_each(move |(socket, _peer_addr)| {
         let (wr, rd) = socket.framed(ServiceCodec).split();
@@ -317,7 +352,7 @@ pub fn run_server() -> Result<(), std::io::Error> {
         let responses = rd.and_then(move |req| service.call(req));
         let responder = wr.send_all(responses)
             .or_else(|e| {
-                println!("{}", e);
+                error!("{}", e);
                 Err(e)
             })
             .then(|_| Ok(()));

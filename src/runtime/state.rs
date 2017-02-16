@@ -18,6 +18,7 @@ pub trait Storage {
     fn push_msg(&mut self, topic: &str, msg: Obj) -> Result<()>;
 
     fn vars(&self) -> &HashMap<String, Value>;
+    fn seq(&self) -> i32;
 }
 
 pub struct State<S: Storage> {
@@ -55,7 +56,7 @@ impl<S: Storage> State<S> {
         }
     }
 
-    pub fn commit(&mut self, txn: Transaction) -> Result<i32> {
+    pub fn commit(&mut self, txn: &mut Transaction) -> Result<i32> {
         debug!("State.commit: BEGIN transaction seq={}", txn.seq);
         let mut txn = txn;
         let mut vars = self.storage.vars().clone();
@@ -149,9 +150,14 @@ impl Storage for MemStorage {
     fn vars(&self) -> &HashMap<String, Value> {
         &self.vars
     }
+
+    fn seq(&self) -> i32 {
+        self.seq
+    }
 }
 
 #[derive(Serialize, Deserialize)]
+#[derive(Debug)]
 struct DurableCheckpoint {
     seq: i32,
     vars: HashMap<String, Value>,
@@ -202,7 +208,7 @@ impl Storage for DurableStorage {
                 .open(&self.checkpoint_path)?;
             self.checkpoint = serde_json::from_reader(chk_file).map_err(to_ioerror)
                 .map_err(error::Error::IO)?;
-            debug!("DurableStorage.load: loaded checkpoint file: vars={:?}", &self.checkpoint.vars);
+            debug!("DurableStorage.load: loaded checkpoint: {:?}", &self.checkpoint);
             Ok((self.checkpoint.seq, self.checkpoint.vars.clone()))
         }
     }
@@ -266,6 +272,10 @@ impl Storage for DurableStorage {
 
     fn vars(&self) -> &HashMap<String, Value> {
         &self.checkpoint.vars
+    }
+
+    fn seq(&self) -> i32 {
+        self.checkpoint.seq
     }
 }
 

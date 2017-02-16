@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate log;
+
 extern crate clap;
 extern crate env_logger;
 extern crate futures;
@@ -76,13 +79,13 @@ fn main() {
         Some("list") => cmd_list(app_m.subcommand_matches("list").unwrap()),
         Some("send") => cmd_send(app_m.subcommand_matches("send").unwrap()),
         Some(subcmd) => {
-            println!("unsupported command {}", subcmd);
-            println!("{}", app_m.usage());
+            error!("unsupported command {}", subcmd);
+            error!("{}", app_m.usage());
             Err(Error::CLI(clap::Error::with_description("unsupported command",
                                                          clap::ErrorKind::HelpDisplayed)))
         }
         None => {
-            println!("{}", app_m.usage());
+            error!("{}", app_m.usage());
             Err(Error::CLI(clap::Error::with_description("missing subcommand",
                                                          clap::ErrorKind::HelpDisplayed)))
         }
@@ -90,7 +93,7 @@ fn main() {
     match result {
         Ok(_) => exit(0),
         Err(e) => {
-            println!("{}", e);
+            error!("{}", e);
             exit(1)
         }
     };
@@ -118,17 +121,17 @@ fn cmd_run<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
         glop.matches.iter().map(|m_ast| runtime::Match::new_from_ast(&m_ast)).collect::<Vec<_>>();
     loop {
         for m_exc in &m_excs {
-            let txn = match st.eval(m_exc.clone()) {
+            let mut txn = match st.eval(m_exc.clone()) {
                 Ok(Some(txn)) => txn,
                 Ok(None) => continue,
                 Err(e) => {
-                    println!("{}", e);
+                    error!("eval failed: {}", e);
                     continue;
                 }
             };
-            match st.commit(txn) {
+            match st.commit(&mut txn) {
                 Ok(_seq) => (),
-                Err(e) => println!("{}", e),
+                Err(e) => error!("commit failed: {}", e),
             };
             thread::sleep(time::Duration::from_millis(200));
         }
@@ -206,6 +209,7 @@ fn cmd_add<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
         .map_err(Error::IO)?;
     match resp {
         agent::Response::Add => Ok(()),
+        agent::Response::Error(msg) => Err(Error::ErrorResponse(msg)),
         _ => Err(Error::BadResponse),
     }
 }
@@ -221,6 +225,7 @@ fn cmd_remove<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
         .map_err(Error::IO)?;
     match resp {
         agent::Response::Remove => Ok(()),
+        agent::Response::Error(msg) => Err(Error::ErrorResponse(msg)),
         _ => Err(Error::BadResponse),
     }
 }
@@ -241,6 +246,7 @@ fn cmd_list<'a>(_app_m: &ArgMatches<'a>) -> AppResult<()> {
             }
             Ok(())
         }
+        agent::Response::Error(msg) => Err(Error::ErrorResponse(msg)),
         _ => Err(Error::BadResponse),
     }
 }
@@ -271,6 +277,7 @@ fn cmd_send<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
         .map_err(Error::IO)?;
     match resp {
         agent::Response::SendTo => Ok(()),
+        agent::Response::Error(msg) => Err(Error::ErrorResponse(msg)),
         _ => Err(Error::BadResponse),
     }
 }
