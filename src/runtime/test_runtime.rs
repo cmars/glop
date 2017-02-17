@@ -83,7 +83,7 @@ fn matched_init_message<T: Storage>(f: StateFactory<T>) {
     let m_ast = parse_one_match(SIMPLE_INIT);
     st.mut_storage().push_msg("init", Obj::new()).unwrap();
     let m_exc = Match::new_from_ast(&m_ast);
-    let txn = match st.eval(m_exc.clone()).unwrap() {
+    let mut txn = match st.eval(m_exc.clone()).unwrap() {
         Some(mut txn) => {
             assert_eq!(txn.seq, 0);
             txn.with_context(|ctx| {
@@ -94,7 +94,7 @@ fn matched_init_message<T: Storage>(f: StateFactory<T>) {
         }
         None => panic!("expected match"),
     };
-    assert!(st.commit(txn).is_ok());
+    assert!(st.commit(&mut txn).is_ok());
 
     match st.eval(m_exc.clone()).unwrap() {
         Some(_) => panic!("unexpected match"),
@@ -133,7 +133,7 @@ fn rollback_msg<T: Storage>(f: StateFactory<T>) {
     assert!(st.rollback(txn).is_ok());
 
     // init message should have been nak'ed on rollback
-    let txn = match st.eval(m_exc.clone()).unwrap() {
+    let mut txn = match st.eval(m_exc.clone()).unwrap() {
         Some(mut txn) => {
             assert_eq!(txn.seq, 0);
             txn.with_context(|ctx| {
@@ -144,7 +144,7 @@ fn rollback_msg<T: Storage>(f: StateFactory<T>) {
         }
         None => panic!("expected match"),
     };
-    assert!(st.commit(txn).is_ok());
+    assert!(st.commit(&mut txn).is_ok());
 
     // Now init message has been consumed.
     match st.eval(m_exc.clone()).unwrap() {
@@ -177,7 +177,7 @@ fn matched_only_init_message<T: Storage>(f: StateFactory<T>) {
                       .collect())
         .unwrap();
     let m_exc = Match::new_from_ast(&m_ast);
-    let txn = match st.eval(m_exc.clone()).unwrap() {
+    let mut txn = match st.eval(m_exc.clone()).unwrap() {
         Some(mut txn) => {
             assert_eq!(txn.seq, 0);
             txn.with_context(|ref mut ctx| {
@@ -188,7 +188,7 @@ fn matched_only_init_message<T: Storage>(f: StateFactory<T>) {
         }
         None => panic!("expected match"),
     };
-    assert!(st.commit(txn).is_ok());
+    assert!(st.commit(&mut txn).is_ok());
 
     match st.eval(m_exc.clone()).unwrap() {
         Some(_) => panic!("unexpected match"),
@@ -218,7 +218,7 @@ fn matched_two_messages<T: Storage>(f: StateFactory<T>) {
     let m_exc = Match::new_from_ast(&m_ast);
 
     for i in 0..2 {
-        let txn = match st.eval(m_exc.clone()).unwrap() {
+        let mut txn = match st.eval(m_exc.clone()).unwrap() {
             Some(mut txn) => {
                 assert_eq!(txn.seq, i);
                 txn.with_context(|ref mut ctx| {
@@ -230,7 +230,7 @@ fn matched_two_messages<T: Storage>(f: StateFactory<T>) {
             }
             None => panic!("expected match"),
         };
-        assert!(st.commit(txn).is_ok());
+        assert!(st.commit(&mut txn).is_ok());
     }
     match st.eval(m_exc.clone()).unwrap() {
         Some(_) => panic!("unexpected match"),
@@ -259,14 +259,14 @@ fn match_equal<T: Storage>(f: StateFactory<T>) {
                   [("foo".to_string(), Value::from_str("bar"))].iter().cloned().collect())
             .unwrap();
         let m_exc = Match::new_from_ast(&m_ast);
-        let txn = match st.eval(m_exc.clone()).unwrap() {
+        let mut txn = match st.eval(m_exc.clone()).unwrap() {
             Some(txn) => {
                 assert_eq!(txn.seq, 1);
                 txn
             }
             None => panic!("expected match"),
         };
-        assert!(st.commit(txn).is_ok());
+        assert!(st.commit(&mut txn).is_ok());
         // foo is now unset
         match st.eval(m_exc.clone()).unwrap() {
             Some(_) => panic!("unexpected match"),
@@ -319,14 +319,14 @@ fn rollback_vars<T: Storage>(f: StateFactory<T>) {
     assert!(st.rollback(txn).is_ok());
     debug!(target: "rollback_vars", "OK rollback");
     // foo should be still set
-    let txn = match st.eval(m_exc.clone()).unwrap() {
+    let mut txn = match st.eval(m_exc.clone()).unwrap() {
         Some(txn) => {
             assert_eq!(txn.seq, 1);
             txn
         }
         None => panic!("expected match"),
     };
-    assert!(st.commit(txn).is_ok());
+    assert!(st.commit(&mut txn).is_ok());
     // foo is now unset
     match st.eval(m_exc.clone()).unwrap() {
         Some(_) => panic!("unexpected match"),
@@ -398,14 +398,14 @@ fn simple_commit_progression<T: Storage>(f: StateFactory<T>) {
               [("foo".to_string(), Value::from_str("blah"))].iter().cloned().collect())
         .unwrap();
     // foo starts out != bar so we expect a match and apply
-    let txn = match st.eval(m_exc_ne.clone()).unwrap() {
+    let mut txn = match st.eval(m_exc_ne.clone()).unwrap() {
         Some(txn) => {
             assert_eq!(txn.seq, 1);
             txn
         }
         None => panic!("expected match"),
     };
-    assert!(st.commit(txn).is_ok());
+    assert!(st.commit(&mut txn).is_ok());
     // above match sets foo == bar so m_exc_ne no longer matches
     match st.eval(m_exc_ne.clone()).unwrap() {
         Some(_) => panic!("unexpected match"),
@@ -413,14 +413,14 @@ fn simple_commit_progression<T: Storage>(f: StateFactory<T>) {
     }
 
     // now let's match on foo == bar, should match committed state now
-    let txn = match st.eval(m_exc_eq.clone()).unwrap() {
+    let mut txn = match st.eval(m_exc_eq.clone()).unwrap() {
         Some(txn) => {
             assert_eq!(txn.seq, 2);
             txn
         }
         None => panic!("expected match"),
     };
-    assert!(st.commit(txn).is_ok());
+    assert!(st.commit(&mut txn).is_ok());
 }
 
 #[test]
@@ -444,14 +444,14 @@ fn match_is_set<T: Storage>(f: StateFactory<T>) {
                   [("foo".to_string(), Value::from_str("bar"))].iter().cloned().collect())
             .unwrap();
         let m_exc = Match::new_from_ast(&m_ast);
-        let txn = match st.eval(m_exc.clone()).unwrap() {
+        let mut txn = match st.eval(m_exc.clone()).unwrap() {
             Some(txn) => {
                 assert_eq!(txn.seq, 1);
                 txn
             }
             None => panic!("expected match"),
         };
-        assert!(st.commit(txn).is_ok());
+        assert!(st.commit(&mut txn).is_ok());
 
         match st.eval(m_exc.clone()).unwrap() {
             Some(_) => panic!("unexpected match"),

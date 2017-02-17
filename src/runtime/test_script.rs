@@ -88,7 +88,7 @@ fn simple_script() {
     let mut st = State::new(MemStorage::new());
     st.mut_storage().push_msg("init", Obj::new()).unwrap();
     let m_exc = Match::new_from_ast(&m_ast);
-    let txn = match st.eval(m_exc.clone()).unwrap() {
+    let mut txn = match st.eval(m_exc.clone()).unwrap() {
         Some(mut txn) => {
             assert_eq!(txn.seq, 0);
             txn.with_context(|ref mut ctx| {
@@ -99,7 +99,7 @@ fn simple_script() {
         }
         None => panic!("expected match"),
     };
-    assert!(st.commit(txn).is_ok());
+    assert!(st.commit(&mut txn).is_ok());
 }
 
 #[test]
@@ -110,7 +110,7 @@ fn simple_script_err() {
     let mut st = State::new(MemStorage::new());
     st.mut_storage().push_msg("init", Obj::new()).unwrap();
     let m_exc = Match::new_from_ast(&m_ast);
-    let txn = match st.eval(m_exc.clone()).unwrap() {
+    let mut txn = match st.eval(m_exc.clone()).unwrap() {
         Some(mut txn) => {
             assert_eq!(txn.seq, 0);
             txn.with_context(|ref mut ctx| {
@@ -121,13 +121,13 @@ fn simple_script_err() {
         }
         None => panic!("expected match"),
     };
-    match st.commit(txn) {
+    match st.commit(&mut txn) {
         Ok(_) => panic!("expected script to error"),
         Err(e) => {
             match e {
                 Error::Exec(rc, ref stderr) => {
                     assert_eq!(rc, 1);
-                    assert_eq!(stderr, "crash and burn\n");
+                    assert_eq!(stderr, "crash and burn");
                 }
                 _ => {
                     panic!("unexpected error: {}", e);
@@ -151,7 +151,7 @@ fn env_check_script_ok() {
                       .collect())
         .unwrap();
     let m_exc = Match::new_from_ast(&m_ast);
-    let txn = match st.eval(m_exc.clone()).unwrap() {
+    let mut txn = match st.eval(m_exc.clone()).unwrap() {
         Some(mut txn) => {
             assert_eq!(txn.seq, 0);
             txn.with_context(|ref mut ctx| {
@@ -162,7 +162,7 @@ fn env_check_script_ok() {
         }
         None => panic!("expected match"),
     };
-    assert!(st.commit(txn).is_ok());
+    assert!(st.commit(&mut txn).is_ok());
 }
 
 #[test]
@@ -173,7 +173,7 @@ fn hello_script_server() {
     let mut st = State::new(MemStorage::new());
     st.mut_storage().push_msg("init", Obj::new()).unwrap();
     let m_exc = Match::new_from_ast(&m_ast);
-    let txn = match st.eval(m_exc.clone()).unwrap() {
+    let mut txn = match st.eval(m_exc.clone()).unwrap() {
         Some(mut txn) => {
             assert_eq!(txn.seq, 0);
             txn.with_context(|ctx| {
@@ -184,7 +184,7 @@ fn hello_script_server() {
         }
         None => panic!("expected match"),
     };
-    assert!(st.commit(txn).is_ok());
+    assert!(st.commit(&mut txn).is_ok());
     assert_eq!(st.storage().vars().get("foo"),
                Some(&Value::from_str("hello-bar")));
 }
@@ -203,11 +203,11 @@ fn script_server_access_msg() {
                       .collect())
         .unwrap();
     let m_exc = Match::new_from_ast(&m_ast);
-    let txn = match st.eval(m_exc.clone()).unwrap() {
+    let mut txn = match st.eval(m_exc.clone()).unwrap() {
         Some(txn) => txn,
         None => panic!("expected match"),
     };
-    assert!(st.commit(txn).is_ok());
+    assert!(st.commit(&mut txn).is_ok());
     assert_eq!(st.storage().vars().get("all"),
                Some(&Value::from_str("good")));
 }
