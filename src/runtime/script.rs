@@ -27,6 +27,7 @@ pub struct ServiceCodec;
 pub enum Request {
     GetVar { key: String },
     SetVar { key: String, value: String },
+    UnsetVar { key: String },
     GetMsg { topic: String, key: String },
 }
 
@@ -35,6 +36,7 @@ pub enum Request {
 pub enum Response {
     GetVar { key: String, value: String },
     SetVar { key: String, value: String },
+    UnsetVar { key: String },
     GetMsg {
         topic: String,
         key: String,
@@ -205,6 +207,14 @@ impl Service for ScriptService {
                     key: key.to_string(),
                     value: value.to_string(),
                 }
+            }
+            Request::UnsetVar { ref key } => {
+                let id = Identifier::from_str(key);
+                drop(ctx);
+                let mut actions = self.actions.lock().unwrap();
+                actions.push(Action::UnsetVar(id));
+                drop(actions);
+                Response::UnsetVar { key: key.to_string() }
             }
             Request::GetMsg { ref topic, ref key } => {
                 match ctx.get_msg(topic, &Identifier::from_str(key)) {

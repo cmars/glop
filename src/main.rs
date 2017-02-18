@@ -50,6 +50,9 @@ fn main() {
             .about("set variable in context")
             .arg(Arg::with_name("KEY").index(1).required(true))
             .arg(Arg::with_name("VALUE").index(2).required(true)))
+        .subcommand(SubCommand::with_name("unsetvar")
+            .about("unset variable in context")
+            .arg(Arg::with_name("KEY").index(1).required(true)))
         .subcommand(SubCommand::with_name("getmsg")
             .about("get message in context")
             .arg(Arg::with_name("TOPIC").index(1).required(true))
@@ -73,6 +76,7 @@ fn main() {
         Some("run") => cmd_run(app_m.subcommand_matches("run").unwrap()),
         Some("getvar") => cmd_getvar(app_m.subcommand_matches("getvar").unwrap()),
         Some("setvar") => cmd_setvar(app_m.subcommand_matches("setvar").unwrap()),
+        Some("unsetvar") => cmd_unsetvar(app_m.subcommand_matches("unsetvar").unwrap()),
         Some("getmsg") => cmd_getmsg(app_m.subcommand_matches("getmsg").unwrap()),
         Some("add") => cmd_add(app_m.subcommand_matches("add").unwrap()),
         Some("remove") => cmd_remove(app_m.subcommand_matches("remove").unwrap()),
@@ -170,6 +174,21 @@ fn cmd_setvar<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
         .map_err(Error::IO)?;
     match resp {
         runtime::ScriptResponse::SetVar { key: _, value: _ } => Ok(()),
+        _ => Err(Error::BadResponse),
+    }
+}
+
+fn cmd_unsetvar<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
+    let mut core = Core::new()?;
+    let handle = core.handle();
+    let addr_str = std::env::var("ADDR").map_err(Error::Env)?;
+    let addr = addr_str.parse().map_err(Error::AddrParse)?;
+    let req = runtime::ScriptRequest::UnsetVar { key: app_m.value_of("KEY").unwrap().to_string() };
+    let builder = TcpClient::new(runtime::ScriptClientProto);
+    let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
+        .map_err(Error::IO)?;
+    match resp {
+        runtime::ScriptResponse::UnsetVar { key: _ } => Ok(()),
         _ => Err(Error::BadResponse),
     }
 }
