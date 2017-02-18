@@ -10,7 +10,7 @@ use std;
 use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::io::{Read, Write};
-use std::os::unix::fs::DirBuilderExt;
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::sync::{Arc, Mutex};
 
 use self::fs2::FileExt;
@@ -19,11 +19,11 @@ use self::futures::sync::mpsc;
 use self::tokio_core::io::{Framed, Io};
 use self::tokio_service::Service as TokioService;
 
-use super::error::Error;
+use super::ast;
 use super::cleanup;
+use super::error::{Error, to_ioerror};
 use super::grammar;
 use super::runtime;
-use super::runtime::Storage;
 use super::value::Obj;
 
 #[derive(Serialize, Deserialize)]
@@ -153,20 +153,18 @@ pub struct Envelope {
     pub contents: Obj,
 }
 
-pub struct Agent<S: Storage> {
+pub struct Agent<S: runtime::Storage> {
     matches: Vec<runtime::Match>,
     st: runtime::State<S>,
     receiver: mpsc::Receiver<Envelope>,
     match_index: usize,
 }
 
-impl<S: Storage> Agent<S> {
-    pub fn new_from_file(path: &str,
-                         st: runtime::State<S>,
-                         receiver: mpsc::Receiver<Envelope>)
-                         -> Result<Agent<S>, Error> {
-        let glop_contents = read_file(path)?;
-        let glop = grammar::glop(&glop_contents).map_err(Error::Parse)?;
+impl<S: runtime::Storage> Agent<S> {
+    pub fn new(glop: &ast::Glop,
+               st: runtime::State<S>,
+               receiver: mpsc::Receiver<Envelope>)
+               -> Result<Agent<S>, Error> {
         let mut st = st;
         if st.storage().seq() == 0 {
             st.mut_storage().push_msg("init", Obj::new())?;
@@ -208,7 +206,7 @@ impl<S: Storage> Agent<S> {
     }
 }
 
-impl<S: Storage> futures::stream::Stream for Agent<S> {
+impl<S: runtime::Storage> futures::stream::Stream for Agent<S> {
     type Item = ();
     type Error = Error;
 
@@ -235,58 +233,117 @@ fn read_file(path: &str) -> Result<String, Error> {
     Ok(s)
 }
 
-#[derive(Clone)]
-pub struct Service {
-    senders: Arc<Mutex<HashMap<String, mpsc::Sender<Envelope>>>>,
-    handle: tokio_core::reactor::Handle,
-    pool: futures_cpupool::CpuPool,
-    path: String,
+type AgentOutboxMap = HashMap<String, mpsc::Sender<Envelope>>;
+
+struct ServiceState<S: Storage + Send + 'static> {
+    storage: S,
+    outboxes: AgentOutboxMap,
 }
 
-impl Service {
-    pub fn new(path: &str, h: &tokio_core::reactor::Handle) -> Service {
-        Service {
-            senders: Arc::new(Mutex::new(HashMap::new())),
-            handle: h.clone(),
-            pool: futures_cpupool::CpuPool::new_num_cpus(),
-            path: path.to_string(),
+impl<S: Storage + Send> ServiceState<S> {
+    pub fn new(storage: S) -> ServiceState<S> {
+        ServiceState {
+            storage: storage,
+            outboxes: AgentOutboxMap::new(),
         }
     }
 
+    fn has_agent(&self, name: &str) -> bool {
+        self.outboxes.contains_key(name)
+    }
+
+    fn remove(&mut self, name: &str) -> Result<(), Error> {
+        self.storage.remove(name)?;
+        self.outboxes.remove(name);
+        Ok(())
+    }
+
+    fn add_all_agents(&mut self, svc: &Service<S>) -> Result<(), Error> {
+        let agents = self.storage.agents()?;
+        for (name, glop) in agents {
+            svc.spawn_agent(&name, &glop, self)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub struct Service<S: Storage + Send + 'static> {
+    state: Arc<Mutex<ServiceState<S>>>,
+    handle: tokio_core::reactor::Handle,
+    pool: futures_cpupool::CpuPool,
+}
+
+impl<S: Storage + Send> Service<S> {
+    pub fn new(storage: S, h: &tokio_core::reactor::Handle) -> Result<Service<S>, Error> {
+        let svc = Service {
+            state: Arc::new(Mutex::new(ServiceState::new(storage))),
+            handle: h.clone(),
+            pool: futures_cpupool::CpuPool::new_num_cpus(),
+        };
+        {
+            let mut state = &mut svc.state.lock().unwrap();
+            state.add_all_agents(&svc)?;
+        }
+        Ok(svc)
+    }
+
+    fn add_agent_source(&self,
+                        name: &str,
+                        source: &str,
+                        state: &mut ServiceState<S>)
+                        -> Result<(), Error> {
+        let glop_contents = read_file(source)?;
+        let glop = grammar::glop(&glop_contents).map_err(Error::Parse)?;
+        self.add_agent(name, glop, state)
+    }
+
+    fn add_agent(&self,
+                 name: &str,
+                 glop: ast::Glop,
+                 state: &mut ServiceState<S>)
+                 -> Result<(), Error> {
+        self.spawn_agent(name, &glop, state)?;
+        state.storage.add(name.to_string(), glop)
+    }
+
+    fn spawn_agent(&self,
+                   name: &str,
+                   glop: &ast::Glop,
+                   state: &mut ServiceState<S>)
+                   -> Result<(), Error> {
+        let runtime_st = state.storage.new_state()?;
+        let (sender, receiver) = mpsc::channel(10);
+        let agent = Agent::new(glop, runtime_st, receiver)?;
+        state.outboxes.insert(name.to_string(), sender);
+        self.handle.spawn(self.pool
+            .spawn(agent.for_each(|_| Ok(()))
+                .or_else(|e| {
+                    error!("{}", e);
+                    Err(e)
+                })
+                .then(|_| Ok(()))));
+        Ok(())
+    }
+
     fn do_call(&self, req: Request) -> Result<Response, Error> {
-        let mut senders = self.senders.lock().unwrap();
+        let mut state = self.state.lock().unwrap();
         debug!("request {:?}", &req);
         let res = match req {
             Request::Add { source: ref add_source, name: ref add_name } => {
-                let (sender, receiver) = mpsc::channel(10);
-                if senders.contains_key(add_name) {
+                if state.has_agent(add_name) {
                     return Ok(Response::Error(format!("agent {} already added", add_name)));
                 }
-                senders.insert(add_name.to_string(), sender);
-                let agent_path = std::path::PathBuf::from(&self.path)
-                    .join(add_name)
-                    .to_str()
-                    .unwrap()
-                    .to_string();
-                let storage = runtime::DurableStorage::new(&agent_path)?;
-                let agent =
-                    Agent::new_from_file(add_source, runtime::State::new(storage), receiver)?;
-                self.handle.spawn(self.pool
-                    .spawn(agent.for_each(|_| Ok(()))
-                        .or_else(|e| {
-                            error!("{}", e);
-                            Err(e)
-                        })
-                        .then(|_| Ok(()))));
+                self.add_agent_source(add_name, add_source, &mut state)?;
                 Response::Add
             }
             Request::Remove { ref name } => {
-                senders.remove(name);
+                state.remove(name)?;
                 Response::Remove
             }
-            Request::List => Response::List { names: senders.keys().cloned().collect() },
+            Request::List => Response::List { names: state.outboxes.keys().cloned().collect() },
             Request::SendTo(env) => {
-                let sender = match senders.get(&env.dst) {
+                let sender = match state.outboxes.get(&env.dst) {
                     Some(s) => s.clone(),
                     None => return Ok(Response::Error(format!("agent {} not found", &env.dst))),
                 };
@@ -301,7 +358,127 @@ impl Service {
     }
 }
 
-impl TokioService for Service {
+pub trait Storage {
+    type RuntimeStorage: runtime::Storage + Send;
+
+    fn new_state(&self) -> Result<runtime::State<Self::RuntimeStorage>, Error>;
+    fn add(&mut self, name: String, glop: ast::Glop) -> Result<(), Error>;
+    fn remove(&mut self, name: &str) -> Result<(), Error>;
+    fn agents(&self) -> Result<HashMap<String, ast::Glop>, Error>;
+}
+
+#[derive(Clone)]
+struct MemStorage {
+    agents: HashMap<String, ast::Glop>,
+}
+
+impl MemStorage {
+    #[allow(dead_code)]
+    fn new() -> MemStorage {
+        MemStorage { agents: HashMap::new() }
+    }
+}
+
+impl Storage for MemStorage {
+    type RuntimeStorage = runtime::MemStorage;
+
+    fn new_state(&self) -> Result<runtime::State<Self::RuntimeStorage>, Error> {
+        Ok(runtime::State::new(runtime::MemStorage::new()))
+    }
+
+    fn add(&mut self, name: String, glop: ast::Glop) -> Result<(), Error> {
+        if self.agents.contains_key(&name) {
+            return Err(Error::AgentExists(name));
+        }
+        self.agents.insert(name, glop);
+        Ok(())
+    }
+
+    fn remove(&mut self, name: &str) -> Result<(), Error> {
+        self.agents.remove(name);
+        Ok(())
+    }
+
+    fn agents(&self) -> Result<HashMap<String, ast::Glop>, Error> {
+        Ok(self.agents.clone())
+    }
+}
+
+#[derive(Clone)]
+struct DurableStorage {
+    path: String,
+    agents_path: String,
+}
+
+impl DurableStorage {
+    fn new(path: &str) -> Result<DurableStorage, Error> {
+        std::fs::DirBuilder::new().recursive(true)
+            .mode(0o700)
+            .create(path)
+            .map_err(Error::IO)?;
+        Ok(DurableStorage {
+            path: path.to_string(),
+            agents_path: std::path::PathBuf::from(path)
+                .join("agents.json")
+                .to_str()
+                .unwrap()
+                .to_string(),
+        })
+    }
+
+    fn load(&self) -> Result<HashMap<String, ast::Glop>, Error> {
+        if !std::path::PathBuf::from(&self.agents_path).exists() {
+            return Ok(HashMap::new());
+        }
+        let agents_file = std::fs::OpenOptions::new().read(true)
+            .open(&self.agents_path)?;
+        let agents: HashMap<String, ast::Glop> =
+            serde_json::from_reader(agents_file).map_err(to_ioerror)
+                .map_err(Error::IO)?;
+        Ok(agents)
+    }
+
+    fn save(&self, agents: HashMap<String, ast::Glop>) -> Result<(), Error> {
+        let mut agents_file = std::fs::OpenOptions::new().write(true)
+            .mode(0o600)
+            .create(true)
+            .truncate(true)
+            .open(&self.agents_path)?;
+        serde_json::to_writer(&mut agents_file, &agents).map_err(to_ioerror)
+            .map_err(Error::IO)?;
+        Ok(())
+    }
+}
+
+impl Storage for DurableStorage {
+    type RuntimeStorage = runtime::DurableStorage;
+
+    fn new_state(&self) -> Result<runtime::State<Self::RuntimeStorage>, Error> {
+        let runtime_storage = runtime::DurableStorage::new(&self.path)?;
+        Ok(runtime::State::new(runtime_storage))
+    }
+
+    fn add(&mut self, name: String, glop: ast::Glop) -> Result<(), Error> {
+        let mut agents = self.load()?;
+        agents.insert(name, glop);
+        self.save(agents)?;
+        Ok(())
+    }
+
+    fn remove(&mut self, name: &str) -> Result<(), Error> {
+        let mut agents = self.load()?;
+        agents.remove(name);
+        self.save(agents)?;
+        Ok(())
+    }
+
+    fn agents(&self) -> Result<HashMap<String, ast::Glop>, Error> {
+        let agents = self.load()?;
+        Ok(agents)
+    }
+}
+
+impl<S: Storage + Send> TokioService for Service<S> {
     type Request = Request;
     type Response = Response;
 
@@ -312,10 +489,8 @@ impl TokioService for Service {
     fn call(&self, req: Self::Request) -> Self::Future {
         match self.do_call(req) {
             Ok(res) => futures::future::ok(res).boxed(),
-            Err(err) => {
-                futures::future::err(std::io::Error::new(std::io::ErrorKind::Other,
-                                                         err.description()))
-                    .boxed()
+            Err(e) => {
+                futures::future::ok(Response::Error(format!("agent service error: {}", e))).boxed()
             }
         }
     }
@@ -334,18 +509,19 @@ impl<T: Io + 'static> tokio_proto::pipeline::ClientProto<T> for ClientProto {
     }
 }
 
-pub fn run_server() -> Result<(), std::io::Error> {
-    let mut core = tokio_core::reactor::Core::new()?;
+pub fn run_server() -> Result<(), Error> {
+    let mut core = tokio_core::reactor::Core::new().map_err(Error::IO)?;
     let handle = core.handle();
     let addr = "127.0.0.1:0".parse().unwrap();
-    let listener = tokio_core::net::TcpListener::bind(&addr, &handle)?;
-    let listen_addr = &listener.local_addr()?;
+    let listener = tokio_core::net::TcpListener::bind(&addr, &handle).map_err(Error::IO)?;
+    let listen_addr = &listener.local_addr().map_err(Error::IO)?;
     info!("server listening on {}", &listen_addr);
-    let _lock = agent_lock(listen_addr)?;
+    let _lock = agent_lock(listen_addr).map_err(Error::IO)?;
     let connections = listener.incoming();
-    let glop_dir = glop_dir()?;
+    let glop_dir = glop_dir().map_err(Error::IO)?;
     debug!("glop_dir={}", glop_dir);
-    let service = Service::new(&glop_dir, &handle);
+    let svc_storage = DurableStorage::new(&glop_dir)?;
+    let service = Service::new(svc_storage, &handle)?;
     let server = connections.for_each(move |(socket, _peer_addr)| {
         let (wr, rd) = socket.framed(ServiceCodec).split();
         let service = service.clone();
@@ -359,7 +535,7 @@ pub fn run_server() -> Result<(), std::io::Error> {
         handle.spawn(responder);
         Ok(())
     });
-    core.run(server)
+    core.run(server).map_err(Error::IO)
 }
 
 pub fn read_agent_addr() -> std::io::Result<String> {

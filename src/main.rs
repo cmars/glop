@@ -107,7 +107,7 @@ fn read_file(path: &str) -> AppResult<String> {
 }
 
 fn cmd_agent<'a>(_app_m: &ArgMatches<'a>) -> AppResult<()> {
-    agent::run_server().map_err(Error::IO)?;
+    agent::run_server()?;
     Ok(())
 }
 

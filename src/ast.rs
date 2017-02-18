@@ -1,9 +1,13 @@
 use std::ops::Deref;
 
+#[derive(Serialize, Deserialize)]
+#[derive(Clone)]
 pub struct Glop {
     pub matches: Vec<Match>,
 }
 
+#[derive(Serialize, Deserialize)]
+#[derive(Clone)]
 pub struct Match {
     pub conditions: Vec<Condition>,
     pub actions: Vec<Action>,
@@ -11,17 +15,23 @@ pub struct Match {
 
 pub type Identifier = Vec<String>;
 
+#[derive(Serialize, Deserialize)]
+#[derive(Clone)]
 pub enum Condition {
     Cmp(Identifier, CmpOpcode, String),
     IsSet(Identifier),
     Message(String),
 }
 
+#[derive(Serialize, Deserialize)]
+#[derive(Clone)]
 pub enum CmpOpcode {
     Equal,
     NotEqual,
 }
 
+#[derive(Serialize, Deserialize)]
+#[derive(Clone)]
 pub enum Action {
     SetVar(Identifier, String),
     UnsetVar(Identifier),

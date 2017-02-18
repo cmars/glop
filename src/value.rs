@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use super::ast;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub enum Value {
     Int(i32),
     Str(String),
@@ -89,6 +90,7 @@ pub type Obj = HashMap<String, Value>;
 
 pub type Env = HashMap<String, String>;
 
+#[derive(Serialize, Deserialize)]
 #[derive(Clone, Debug)]
 pub struct Identifier(Vec<String>);
 

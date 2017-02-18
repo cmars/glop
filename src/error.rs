@@ -107,3 +107,7 @@ impl std::error::Error for Error {
         }
     }
 }
+
+pub fn to_ioerror<E: std::error::Error>(e: E) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::Other, e.description())
+}
