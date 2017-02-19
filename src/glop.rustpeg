@@ -38,6 +38,7 @@ value -> String
 unaryfunc -> Condition
     = "message" __ k:identifier { Condition::Message(k.join(".")) }
     / "is_set" __ k:identifier { Condition::IsSet(k) }
+    / "is_unset" __ k:identifier { Condition::IsUnset(k) }
 
 cmpop -> CmpOpcode
     = "==" { CmpOpcode::Equal }

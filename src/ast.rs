@@ -20,6 +20,7 @@ pub type Identifier = Vec<String>;
 pub enum Condition {
     Cmp(Identifier, CmpOpcode, String),
     IsSet(Identifier),
+    IsUnset(Identifier),
     Message(String),
 }
 
@@ -83,6 +84,7 @@ impl fmt::Display for Condition {
         match self {
             &Condition::Cmp(ref l, ref op, ref r) => write!(f, "{} {} {}", FmtIdentifier(l), op, r),
             &Condition::IsSet(ref k) => write!(f, "is_set {}", FmtIdentifier(k)),
+            &Condition::IsUnset(ref k) => write!(f, "is_unset {}", FmtIdentifier(k)),
             &Condition::Message(ref k) => write!(f, "message {}", k),
         }
     }

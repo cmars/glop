@@ -26,6 +26,6 @@ cargo build
 lxc file push ./target/debug/glop ${CONTAINER}/usr/bin/glop
 lxc exec ${CONTAINER} -- mkdir -p /etc/glop
 lxc file push ${GLOPSRC} ${CONTAINER}/etc/glop/${GLOPNAME}.glop
-nohup lxc exec --env RUST_LOG=info ${CONTAINER} -- /bin/bash -c '/usr/bin/glop agent' &
+nohup lxc exec --env RUST_LOG=debug ${CONTAINER} -- /bin/bash -c '/usr/bin/glop server' &
 lxc exec ${CONTAINER} -- /bin/bash -c 'for i in {1..10}; do [ -e ~/.glop.agent ] && break || sleep $i; done'
-lxc exec ${CONTAINER} -- /usr/bin/glop add ${GLOPNAME} /etc/glop/${GLOPNAME}.glop
+lxc exec ${CONTAINER} -- /usr/bin/glop agent add ${GLOPNAME} /etc/glop/${GLOPNAME}.glop

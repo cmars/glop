@@ -66,6 +66,7 @@ impl Transaction {
                 }
             }
             &Condition::IsSet(ref k) => k.is_set(&ctx.vars),
+            &Condition::IsUnset(ref k) => !k.is_set(&ctx.vars),
             &Condition::Message(ref k) => ctx.msgs.contains_key(k),
         }
     }

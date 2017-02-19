@@ -9,11 +9,11 @@
 //  glop send a message.special="sauce"  # echos the sauce
 
 when (message ping) #!/bin/bash
-message=$(glop getmsg ping message.text)
+message=$(glop msg get ping message.text)
 if [ -n "${message}" ]; then
 	echo "message text: $message"
 fi
-message_special=$(glop getmsg ping message.special)
+message_special=$(glop msg get ping message.special)
 if [ -n "${message_special}" ]; then
 	echo "message special: $message_special"
 fi

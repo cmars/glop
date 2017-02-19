@@ -9,13 +9,13 @@ when (message init) {
 when (ping == true) #!/bin/bash
 echo ping
 export ADDR
-glop setvar ping false
-glop setvar pong true
+glop var set ping false
+glop var set pong true
 !#
 
 when (pong == true) #!/bin/bash
 echo pong
 export ADDR
-glop setvar ping true
-glop setvar pong false
+glop var set ping true
+glop var set pong false
 !#

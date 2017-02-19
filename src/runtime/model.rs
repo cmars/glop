@@ -41,6 +41,7 @@ impl Match {
 pub enum Condition {
     Cmp(Identifier, CmpOpcode, String),
     IsSet(Identifier),
+    IsUnset(Identifier),
     Message(String),
 }
 
@@ -51,6 +52,7 @@ impl Condition {
                 Condition::Cmp(Identifier::from_ast(l), CmpOpcode::new(op), r.to_string())
             }
             &ast::Condition::IsSet(ref k) => Condition::IsSet(Identifier::from_ast(k)),
+            &ast::Condition::IsUnset(ref k) => Condition::IsUnset(Identifier::from_ast(k)),
             &ast::Condition::Message(ref k) => Condition::Message(k.to_string()),
         }
     }

@@ -39,63 +39,109 @@ fn main() {
         .version("0")
         .author("Casey Marshall")
         .about("Glue Language for OPerations")
-        .subcommand(SubCommand::with_name("agent").about("run the agent server"))
+        .subcommand(SubCommand::with_name("server").about("run the agent server"))
         .subcommand(SubCommand::with_name("run")
             .about("run the interpreter")
             .arg(Arg::with_name("GLOPFILE").index(1).multiple(true).required(true)))
-        .subcommand(SubCommand::with_name("getvar")
-            .about("get variable in context")
-            .arg(Arg::with_name("KEY").index(1).required(true)))
-        .subcommand(SubCommand::with_name("setvar")
-            .about("set variable in context")
-            .arg(Arg::with_name("KEY").index(1).required(true))
-            .arg(Arg::with_name("VALUE").index(2).required(true)))
-        .subcommand(SubCommand::with_name("unsetvar")
-            .about("unset variable in context")
-            .arg(Arg::with_name("KEY").index(1).required(true)))
-        .subcommand(SubCommand::with_name("getmsg")
-            .about("get message in context")
-            .arg(Arg::with_name("TOPIC").index(1).required(true))
-            .arg(Arg::with_name("KEY").index(2).required(true)))
-        .subcommand(SubCommand::with_name("add")
-            .about("add an agent")
-            .arg(Arg::with_name("NAME").index(1).required(true))
-            .arg(Arg::with_name("SOURCE").index(2).required(true)))
-        .subcommand(SubCommand::with_name("remove")
-            .about("remove an agent")
-            .arg(Arg::with_name("NAME").index(1).required(true)))
-        .subcommand(SubCommand::with_name("list").about("list agents"))
-        .subcommand(SubCommand::with_name("send")
-            .about("send a message to an agent")
-            .arg(Arg::with_name("NAME").index(1).required(true))
-            .arg(Arg::with_name("TOPIC").index(2).required(true))
-            .arg(Arg::with_name("CONTENTS").index(3).multiple(true).required(false)));
+        .subcommand(SubCommand::with_name("var")
+            .about("access variables from glop runtime")
+            .subcommand(SubCommand::with_name("get")
+                .about("display value of variable")
+                .arg(Arg::with_name("KEY").index(1).required(true)))
+            .subcommand(SubCommand::with_name("set")
+                .about("set value of variable")
+                .arg(Arg::with_name("KEY").index(1).required(true))
+                .arg(Arg::with_name("VALUE").index(2).required(true)))
+            .subcommand(SubCommand::with_name("unset")
+                .about("unset variable")
+                .arg(Arg::with_name("KEY").index(1).required(true))))
+        .subcommand(SubCommand::with_name("msg")
+            .about("access messages from glop runtime")
+            .subcommand(SubCommand::with_name("get")
+                .about("get value of message")
+                .arg(Arg::with_name("TOPIC").index(1).required(true))
+                .arg(Arg::with_name("KEY").index(2).required(true))))
+        .subcommand(SubCommand::with_name("agent")
+            .about("manage the agent server")
+            .subcommand(SubCommand::with_name("add")
+                .about("add an agent")
+                .arg(Arg::with_name("NAME").index(1).required(true))
+                .arg(Arg::with_name("SOURCE").index(2).required(true)))
+            .subcommand(SubCommand::with_name("remove")
+                .about("remove an agent")
+                .arg(Arg::with_name("NAME").index(1).required(true)))
+            .subcommand(SubCommand::with_name("list").about("list agents"))
+            .subcommand(SubCommand::with_name("send")
+                .about("send a message to an agent")
+                .arg(Arg::with_name("NAME").index(1).required(true))
+                .arg(Arg::with_name("TOPIC").index(2).required(true))
+                .arg(Arg::with_name("CONTENTS").index(3).multiple(true).required(false))));
     let app_m = app.get_matches();
-    let result = match app_m.subcommand_name() {
-        Some("agent") => cmd_agent(app_m.subcommand_matches("agent").unwrap()),
-        Some("run") => cmd_run(app_m.subcommand_matches("run").unwrap()),
-        Some("getvar") => cmd_getvar(app_m.subcommand_matches("getvar").unwrap()),
-        Some("setvar") => cmd_setvar(app_m.subcommand_matches("setvar").unwrap()),
-        Some("unsetvar") => cmd_unsetvar(app_m.subcommand_matches("unsetvar").unwrap()),
-        Some("getmsg") => cmd_getmsg(app_m.subcommand_matches("getmsg").unwrap()),
-        Some("add") => cmd_add(app_m.subcommand_matches("add").unwrap()),
-        Some("remove") => cmd_remove(app_m.subcommand_matches("remove").unwrap()),
-        Some("list") => cmd_list(app_m.subcommand_matches("list").unwrap()),
-        Some("send") => cmd_send(app_m.subcommand_matches("send").unwrap()),
-        Some(subcmd) => {
-            error!("unsupported command {}", subcmd);
-            error!("{}", app_m.usage());
-            Err(Error::CLI(clap::Error::with_description("unsupported command",
-                                                         clap::ErrorKind::HelpDisplayed)))
-        }
-        None => {
-            error!("{}", app_m.usage());
-            Err(Error::CLI(clap::Error::with_description("missing subcommand",
-                                                         clap::ErrorKind::HelpDisplayed)))
-        }
-    };
+    let result =
+        match app_m.subcommand_name() {
+            Some("server") => cmd_server(app_m.subcommand_matches("server").unwrap()),
+            Some("run") => cmd_run(app_m.subcommand_matches("run").unwrap()),
+            Some("var") => {
+                let sub_m = app_m.subcommand_matches("var").unwrap();
+                match sub_m.subcommand_name() {
+                    Some("get") => cmd_getvar(sub_m.subcommand_matches("get").unwrap()),
+                    Some("set") => cmd_setvar(sub_m.subcommand_matches("set").unwrap()),
+                    Some("unset") => cmd_unsetvar(sub_m.subcommand_matches("unset").unwrap()),
+                    Some(subcmd) => {
+                        error!("unsupported command {}", subcmd);
+                        Err(Error::CLI(clap::Error::with_description("unsupported command",
+                                                             clap::ErrorKind::HelpDisplayed)))
+                    }
+                    None => Err(Error::CLI(clap::Error::with_description("missing subcommand",
+                                                         clap::ErrorKind::HelpDisplayed))),
+                }
+            }
+            Some("msg") => {
+                let sub_m = app_m.subcommand_matches("msg").unwrap();
+                match sub_m.subcommand_name() {
+                    Some("get") => cmd_getmsg(sub_m.subcommand_matches("get").unwrap()),
+                    Some(subcmd) => {
+                        error!("unsupported command {}", subcmd);
+                        Err(Error::CLI(clap::Error::with_description("unsupported command",
+                                                             clap::ErrorKind::HelpDisplayed)))
+                    }
+                    None => Err(Error::CLI(clap::Error::with_description("missing subcommand",
+                                                         clap::ErrorKind::HelpDisplayed))),
+                }
+            }
+            Some("agent") => {
+                let sub_m = app_m.subcommand_matches("agent").unwrap();
+                match sub_m.subcommand_name() {
+                    Some("add") => cmd_add(sub_m.subcommand_matches("add").unwrap()),
+                    Some("remove") => cmd_remove(sub_m.subcommand_matches("remove").unwrap()),
+                    Some("list") => cmd_list(sub_m.subcommand_matches("list").unwrap()),
+                    Some("send") => cmd_send(sub_m.subcommand_matches("send").unwrap()),
+                    Some(subcmd) => {
+                        error!("unsupported command {}", subcmd);
+                        Err(Error::CLI(clap::Error::with_description("unsupported command",
+                                                             clap::ErrorKind::HelpDisplayed)))
+                    }
+                    None => Err(Error::CLI(clap::Error::with_description("missing subcommand",
+                                                         clap::ErrorKind::HelpDisplayed))),
+                }
+            }
+            Some(subcmd) => {
+                error!("unsupported command {}", subcmd);
+                Err(Error::CLI(clap::Error::with_description("unsupported command",
+                                                             clap::ErrorKind::HelpDisplayed)))
+            }
+            None => {
+                Err(Error::CLI(clap::Error::with_description("missing subcommand",
+                                                             clap::ErrorKind::HelpDisplayed)))
+            }
+        };
     match result {
         Ok(_) => exit(0),
+        Err(Error::CLI(e)) => {
+            error!("{}", e);
+            error!("{}", app_m.usage());
+            exit(64)  // EX_USAGE
+        }
         Err(e) => {
             error!("{}", e);
             exit(1)
@@ -110,7 +156,7 @@ fn read_file(path: &str) -> AppResult<String> {
     Ok(s)
 }
 
-fn cmd_agent<'a>(_app_m: &ArgMatches<'a>) -> AppResult<()> {
+fn cmd_server<'a>(_app_m: &ArgMatches<'a>) -> AppResult<()> {
     agent::run_server()?;
     Ok(())
 }

@@ -12,18 +12,18 @@ wget https://bintray.com/artifact/download/seafile-org/seafile/seafile-server_6.
 tar xzf seafile-server_6.0.8_x86-64.tar.gz
 ./seafile-server-6.0.8/setup-seafile.sh auto
 
-glop setvar installed true
+glop var set installed true
 !#
 
-when (message start, is_set installed) #!/bin/bash
+when (message start, is_set installed, is_unset running) #!/bin/bash
 set -e
 ~/Downloads/seafile-server-latest/seafile.sh start
-glop setvar running true
+glop var set running true
 !#
 
 when (message stop, is_set installed, is_set running) #!/bin/bash
 set -e
 ~/Downloads/seafile-server-latest/seafile.sh stop
-glop unsetvar running
+glop var unset running
 !#
 
