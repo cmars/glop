@@ -313,7 +313,7 @@ impl<S: Storage + Send> Service<S> {
                    glop: &ast::Glop,
                    state: &mut ServiceState<S>)
                    -> Result<(), Error> {
-        let runtime_st = state.storage.new_state()?;
+        let runtime_st = state.storage.new_state(name)?;
         let (sender, receiver) = mpsc::channel(10);
         let agent = Agent::new(glop, runtime_st, receiver)?;
         state.outboxes.insert(name.to_string(), sender);
@@ -362,7 +362,7 @@ impl<S: Storage + Send> Service<S> {
 pub trait Storage {
     type RuntimeStorage: runtime::Storage + Send;
 
-    fn new_state(&self) -> Result<runtime::State<Self::RuntimeStorage>, Error>;
+    fn new_state(&self, name: &str) -> Result<runtime::State<Self::RuntimeStorage>, Error>;
     fn add(&mut self, name: String, glop: ast::Glop) -> Result<(), Error>;
     fn remove(&mut self, name: &str) -> Result<(), Error>;
     fn agents(&self) -> Result<HashMap<String, ast::Glop>, Error>;
@@ -383,7 +383,7 @@ impl MemStorage {
 impl Storage for MemStorage {
     type RuntimeStorage = runtime::MemStorage;
 
-    fn new_state(&self) -> Result<runtime::State<Self::RuntimeStorage>, Error> {
+    fn new_state(&self, _name: &str) -> Result<runtime::State<Self::RuntimeStorage>, Error> {
         Ok(runtime::State::new(runtime::MemStorage::new()))
     }
 
@@ -454,8 +454,13 @@ impl DurableStorage {
 impl Storage for DurableStorage {
     type RuntimeStorage = runtime::DurableStorage;
 
-    fn new_state(&self) -> Result<runtime::State<Self::RuntimeStorage>, Error> {
-        let runtime_storage = runtime::DurableStorage::new(&self.path)?;
+    fn new_state(&self, name: &str) -> Result<runtime::State<Self::RuntimeStorage>, Error> {
+        let runtime_path = std::path::PathBuf::from(&self.path)
+            .join(name)
+            .to_str()
+            .unwrap()
+            .to_string();
+        let runtime_storage = runtime::DurableStorage::new(&runtime_path)?;
         Ok(runtime::State::new(runtime_storage))
     }
 
