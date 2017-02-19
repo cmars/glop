@@ -23,7 +23,7 @@ exit 1
 "###;
 const ENV_CHECK_SCRIPT: &'static str = r###"
 when (message test) {
-    set foo bar;
+    var set foo bar;
     script #!/bin/bash
 env
 [ "${test__content}" == "hello world" ]
@@ -32,20 +32,20 @@ env
 "###;
 const HELLO_SCRIPT_SERVER: &'static str = r###"
 when (message init) {
-    set foo bar;
+    var set foo bar;
     script #!/bin/bash
 set -e
 [ -n "$ADDR" ]
 PORT=$(echo ${ADDR} | sed 's/.*://')
 
-# glop getvar foo
+# glop var get foo
 FOO=$(nc 127.0.0.1 ${PORT} <<EOF
 {"GetVar":{"key":"foo"}}
 EOF)
 echo ${FOO}
 FOO=$(echo ${FOO} | jq -r '.GetVar.value')
 
-# glop setvar foo hello
+# glop var set foo hello
 nc 127.0.0.1 ${PORT} <<EOF
 {"SetVar":{"key":"foo","value":"hello-${FOO}"}}
 EOF
@@ -60,13 +60,13 @@ set -e
 [ -n "$ADDR" ]
 PORT=$(echo ${ADDR} | sed 's/.*://')
 
-# glop getmsg init foo
+# glop msg get init foo
 FOO=$(nc 127.0.0.1 ${PORT} <<EOF
 {"GetMsg":{"topic":"init","key":"foo"}}
 EOF)
 [ "$(echo ${FOO} | jq -r '.GetMsg.value')" = "bar" ]
 
-# glop setvar all good
+# glop var set all good
 nc 127.0.0.1 ${PORT} <<EOF
 {"SetVar":{"key":"all","value":"good"}}
 EOF

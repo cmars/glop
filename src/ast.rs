@@ -36,6 +36,7 @@ pub enum CmpOpcode {
 pub enum Action {
     SetVar(Identifier, String),
     UnsetVar(Identifier),
+    PopMsg(String),
     Script(String),
 }
 
@@ -44,8 +45,9 @@ use std::fmt;
 impl fmt::Display for Action {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            &Action::SetVar(ref k, ref v) => write!(f, "set {} {};", FmtIdentifier(k), v),
-            &Action::UnsetVar(ref k) => write!(f, "unset {};", FmtIdentifier(k)),
+            &Action::SetVar(ref k, ref v) => write!(f, "var set {} {};", FmtIdentifier(k), v),
+            &Action::UnsetVar(ref k) => write!(f, "var unset {};", FmtIdentifier(k)),
+            &Action::PopMsg(ref topic) => write!(f, "msg pop {};", topic),
             &Action::Script(ref v) => write!(f, r#"script {}!#"#, v),
         }
     }

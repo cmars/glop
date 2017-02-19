@@ -91,6 +91,7 @@ impl CmpOpcode {
 pub enum Action {
     SetVar(Identifier, String),
     UnsetVar(Identifier),
+    PopMsg(String),
     Script(String),
 }
 
@@ -101,6 +102,7 @@ impl Action {
                 Action::SetVar(Identifier::from_ast(k), v.to_string())
             }
             &ast::Action::UnsetVar(ref k) => Action::UnsetVar(Identifier::from_ast(k)),
+            &ast::Action::PopMsg(ref topic) => Action::PopMsg(topic.to_string()),
             &ast::Action::Script(ref contents) => Action::Script(contents.to_string()),
         }
     }

@@ -29,6 +29,7 @@ pub enum Request {
     SetVar { key: String, value: String },
     UnsetVar { key: String },
     GetMsg { topic: String, key: String },
+    PopMsg { topic: String },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -42,6 +43,7 @@ pub enum Response {
         key: String,
         value: String,
     },
+    PopMsg { topic: String },
 }
 
 impl Codec for ServiceCodec {
@@ -210,6 +212,7 @@ impl Service for ScriptService {
             }
             Request::UnsetVar { ref key } => {
                 let id = Identifier::from_str(key);
+                ctx.unset_var(&id);
                 drop(ctx);
                 let mut actions = self.actions.lock().unwrap();
                 actions.push(Action::UnsetVar(id));
@@ -233,6 +236,14 @@ impl Service for ScriptService {
                         }
                     }
                 }
+            }
+            Request::PopMsg { ref topic } => {
+                ctx.pop_msg(topic);
+                drop(ctx);
+                let mut actions = self.actions.lock().unwrap();
+                actions.push(Action::PopMsg(topic.to_string()));
+                drop(actions);
+                Response::PopMsg { topic: topic.to_string() }
             }
         };
         future::ok(res).boxed()

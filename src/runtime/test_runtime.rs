@@ -9,11 +9,11 @@ use super::*;
 use super::super::grammar;
 use self::value::{Obj, Value};
 
-const SIMPLE_INIT: &'static str = r#"when (message init) { }"#;
-const TWO_MSGS: &'static str = r#"when (message foo, message bar) { }"#;
-const SIMPLE_EQUAL: &'static str = r#"when (foo == bar) { unset foo; }"#;
-const SIMPLE_NOT_EQUAL: &'static str = r#"when (foo != bar) { set foo bar; }"#;
-const SIMPLE_IS_SET: &'static str = r#"when (is_set foo) { unset foo; }"#;
+const SIMPLE_INIT: &'static str = r#"when (message init) { msg pop init; }"#;
+const TWO_MSGS: &'static str = r#"when (message foo, message bar) { msg pop foo; msg pop bar; }"#;
+const SIMPLE_EQUAL: &'static str = r#"when (foo == bar) { var unset foo; }"#;
+const SIMPLE_NOT_EQUAL: &'static str = r#"when (foo != bar) { var set foo bar; }"#;
+const SIMPLE_IS_SET: &'static str = r#"when (is_set foo) { var unset foo; }"#;
 
 fn setup() {
     let _ = env_logger::init();

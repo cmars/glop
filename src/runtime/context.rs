@@ -1,5 +1,5 @@
 use std;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::process::Command;
 
 use super::value::{Identifier, Obj, Value};
@@ -7,9 +7,18 @@ use super::value::{Identifier, Obj, Value};
 pub struct Context {
     pub vars: HashMap<String, Value>,
     pub msgs: HashMap<String, Obj>,
+    pub popped_topics: HashSet<String>,
 }
 
 impl Context {
+    pub fn new(vars: HashMap<String, Value>, msgs: HashMap<String, Obj>) -> Context {
+        Context {
+            vars: vars,
+            msgs: msgs,
+            popped_topics: HashSet::new(),
+        }
+    }
+
     pub fn set_env(&self, cmd: &mut Command) {
         for (k, v) in Value::to_env(&self.vars) {
             cmd.env(k, v);
@@ -44,5 +53,9 @@ impl Context {
 
     pub fn unset_var(&mut self, key: &Identifier) {
         key.unset(&mut self.vars)
+    }
+
+    pub fn pop_msg(&mut self, topic: &str) {
+        self.popped_topics.insert(topic.to_string());
     }
 }

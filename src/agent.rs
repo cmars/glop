@@ -166,7 +166,8 @@ impl<S: runtime::Storage> Agent<S> {
                receiver: mpsc::Receiver<Envelope>)
                -> Result<Agent<S>, Error> {
         let mut st = st;
-        if st.storage().seq() == 0 {
+        let (seq, _) = st.mut_storage().load()?;
+        if seq == 0 {
             st.mut_storage().push_msg("init", Obj::new())?;
         }
         let m_excs = glop.matches

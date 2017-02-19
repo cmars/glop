@@ -3,7 +3,8 @@
 // executed by glop.
 
 when (message init) {
-  set ping true;
+  var set ping true;
+  msg pop init;
 }
 
 when (ping == true) #!/bin/bash

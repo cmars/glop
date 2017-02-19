@@ -42,10 +42,7 @@ impl<S: Storage> State<S> {
         debug!("State.eval: {:?}", &m);
         let (seq, vars) = self.storage.load()?;
         let msgs = self.storage.next_messages(&m.msg_topics)?;
-        let ctx = Context {
-            vars: vars,
-            msgs: msgs,
-        };
+        let ctx = Context::new(vars, msgs);
         let txn = Transaction::new(m, seq, ctx);
         if txn.eval() {
             debug!("State.eval: MATCHED");
@@ -60,6 +57,7 @@ impl<S: Storage> State<S> {
         debug!("State.commit: BEGIN transaction seq={}", txn.seq);
         let mut txn = txn;
         let mut vars = self.storage.vars().clone();
+        let mut popped = HashSet::new();
         let actions = txn.apply()?;
         for action in actions {
             debug!(target: "State.commit", "action {:?}", action);
@@ -70,8 +68,17 @@ impl<S: Storage> State<S> {
                 &Action::UnsetVar(ref k) => {
                     k.unset(&mut vars);
                 }
+                &Action::PopMsg(ref topic) => {
+                    popped.insert(topic.to_string());
+                }
                 _ => return Err(Error::UnsupportedAction),
             };
+        }
+        let msgs = txn.with_context(|ctx| ctx.msgs.clone());
+        for (topic, msg) in msgs {
+            if !popped.contains(&topic) {
+                self.storage.push_msg(&topic, msg)?;
+            }
         }
         self.storage.save(txn.seq, vars)?;
         debug!("State.commit: OK transaction seq={}", txn.seq);

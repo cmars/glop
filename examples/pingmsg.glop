@@ -8,6 +8,12 @@
 //  glop send a message.text="hello"     # echos the message.text "hello"
 //  glop send a message.special="sauce"  # echos the sauce
 
+when (message init) #!/bin/bash
+echo "pingmsg agent online"
+echo "'glop send <name> ping' to ping this agent"
+glop msg pop init
+!#
+
 when (message ping) #!/bin/bash
 message=$(glop msg get ping message.text)
 if [ -n "${message}" ]; then
@@ -18,4 +24,5 @@ if [ -n "${message_special}" ]; then
 	echo "message special: $message_special"
 fi
 echo pong
+glop msg pop ping
 !#

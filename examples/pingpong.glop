@@ -2,21 +2,21 @@
 // Variables are manipulated by the 'set' action keyword.
 
 when (message init) {
-  set ping true;
+  var set ping true;
 }
 
 when (ping == true) {
   script #!/bin/bash
 echo ping
 !#
-  set ping false;
-  set pong true;
+  var set ping false;
+  var set pong true;
 }
 
 when (pong == true) {
   script #!/bin/bash
 echo pong
 !#
-  set ping true;
-  set pong false;
+  var set ping true;
+  var set pong false;
 }

@@ -5,8 +5,9 @@ use super::grammar;
 #[test]
 fn round_trip_simple() {
     let src = r#"when (message init) {
-    set installed false;
-    set initialized true;
+    var set installed false;
+    var set initialized true;
+    msg pop init;
 }
 
 when (installed == false, initialized == true) {
@@ -14,15 +15,16 @@ when (installed == false, initialized == true) {
 set -ex
 echo "hello world"
 !#
-    set installed true;
+    var set installed true;
 }
 
 when (message config, is_set initialized) {
+    msg pop config;
 }
 
 when (message foo, initialized != baz) {
-    set has_foo true;
-    unset bar;
+    var set has_foo true;
+    var unset bar;
 }
 
 "#;
