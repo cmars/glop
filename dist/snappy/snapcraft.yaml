@@ -10,7 +10,7 @@ confinement: strict
 
 apps:
   glop:
-    command: glop
+    command: glop-wrapper
     plugs:
       - network
       - network-bind
@@ -21,3 +21,9 @@ parts:
     plugin: rust
     rust-channel: stable
     source: https://github.com/glop-rs/glop.git
+  files:
+    plugin: dump
+    source: .
+    snap:
+      - glop-wrapper
+
