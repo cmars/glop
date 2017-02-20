@@ -1,29 +1,145 @@
 // This agent installs and operates Seafile (https://www.seafile.com)
 
+// Init message is always sent on initial agent startup.
+// Install seafile.
+
 when (message init) #!/bin/bash
 set -e
 
 apt-get update
 apt-get install -y --no-install-recommends wget python2.7 python-setuptools python-imaging sqlite3
 
-mkdir -p ~/Downloads
-pushd ~/Downloads
-wget https://bintray.com/artifact/download/seafile-org/seafile/seafile-server_6.0.8_x86-64.tar.gz
-tar xzf seafile-server_6.0.8_x86-64.tar.gz
-./seafile-server-6.0.8/setup-seafile.sh auto
+cd
+wget -O seafile-server.tar.gz https://bintray.com/artifact/download/seafile-org/seafile/seafile-server_6.0.8_x86-64.tar.gz
+tar xzf seafile-server.tar.gz
+~/seafile-server-6.0.8/setup-seafile.sh auto
+
+# Default settings
+glop var set seafile.port 8082
 
 glop var set installed true
+glop msg pop init
 !#
+
+// Start seafile if installed and not running.
 
 when (message start, is_set installed, is_unset running) #!/bin/bash
 set -e
-~/Downloads/seafile-server-latest/seafile.sh start
+~/seafile-server-latest/seafile.sh start
 glop var set running true
+glop msg pop start
 !#
+
+// Not starting seafile if already running (needs simplification).
+
+when (message start, is_set running) #!/bin/bash
+set -e
+echo "already started"
+glop msg pop start
+!#
+
+// Stop seafile if installed and running.
 
 when (message stop, is_set installed, is_set running) #!/bin/bash
 set -e
-~/Downloads/seafile-server-latest/seafile.sh stop
+~/seafile-server-latest/seafile.sh stop
 glop var unset running
+glop msg pop stop
 !#
 
+// Not stopping seafile if not running (needs simplification).
+
+when (message stop, is_unset running) #!/bin/bash
+set -e
+echo "already stopped"
+glop msg pop stop
+!#
+
+/*********************************************************************
+
+// Future plans
+
+// Detect unexpected server stop (crash, manually stopped, etc.)
+// Why? This could be used to trigger an agent that operates seafile for us!
+
+when (elapsed 15s, is_set running) #!/bin/bash
+set -e
+PID=$(cat ~/pids/seaf-server.pid)
+if [ ! -e /proc/${PID}/exe ]; then
+	echo "seafile no longer running"
+	glop var unset running
+fi
+PROC_EXE=$(basename $(readlink /proc/${PID}/exe))
+if [ "$PROC_EXE" != "seaf-server" ]; then
+	echo "seafile no longer running; stale pidfile detected"
+	glop var unset running
+fi
+!#
+
+// Detect unexpected server start (crash, manually stopped, etc.)
+// Why? This could be used to trigger an agent that operates seafile for us!
+
+when (elapsed 15s, is_unset running) #!/bin/bash
+set -e
+PID=$(cat ~/pids/seaf-server.pid)
+if [ ! -e /proc/${PID}/exe ]; then
+	exit 0
+fi
+PROC_EXE=$(basename $(readlink /proc/${PID}/exe))
+if [ "$PROC_EXE" != "seaf-server" ]; then
+    exit 0
+	glop var unset running
+fi
+echo "seafile is actually running"
+glop var set running true
+!#
+
+// Introductions are a way for agents to discover each other and work together.
+// Here we introduce seafile to a frontend reverse proxy as a backend. seafile
+// sends its address and port, so that the frontend may route requests to it.
+
+when (message intro,
+      intro.self.role == backend,
+      intro.peer.role == frontend) #!/bin/bash
+set -e
+peer=$(glop msg get intro.peer.name)
+myip= # magic!
+glop var set frontend ${peer}
+glop msg send ${peer} backend addr=${myip} port=${glop var get seafile.port}
+glop msg pop intro
+!#
+
+// Configuring seafile.
+// A config message can trigger operations and mutate state. This could be done
+// by the user agent (glop agent send seafile config ...) or an orchestrating
+// autonomous agent introduced to seafile.
+
+when (message config) #!/bin/bash
+set -e
+
+glop var set seafile config.seafile
+
+# update actual config file here
+# restart the service
+
+glop msg send self configured
+!#
+
+// No frontend; nothing to do (this needs simplification)
+
+when (message configured, is_unset frontend) #!/bin/bash
+set -e
+glop msg pop configured
+!#
+
+// Update frontend when relevant information has changed
+
+when (message configured, is_set frontend) #!/bin/bash
+set -e
+peer=$(glop msg get intro.peer.name)
+myip= # magic!
+glop msg send ${peer} backend addr=${myip} port=${glop var get seafile.port}
+glop msg pop configured
+!#
+
+*********************************************************************/
