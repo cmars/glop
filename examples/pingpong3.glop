@@ -1,0 +1,36 @@
+// This agent will echo "pong" to messages of topic "ping".
+// The contents of "message.text" or "message.special"
+// in the ping message will also be echoed. 
+//
+// For example, given an agent 'a' running this glopfile:
+//  glop send a ping     # just echos "pong"
+//  glop send a foo.bar  # same
+//  glop send a message.text="hello"     # echos the message.text "hello"
+//  glop send a message.special="sauce"  # echos the sauce
+
+when (message init) #!/bin/bash
+echo "pingmsg agent online"
+glop msg send self ping text="from init"
+glop msg send self pong text="from init"
+glop msg pop init
+!#
+
+when (message ping) #!/bin/bash
+text=$(glop msg get ping text)
+if [ -n "${text}" ]; then
+	echo "ping text: ${text}"
+fi
+glop msg send self pong text="from ping"
+echo ping
+glop msg pop ping
+!#
+
+when (message pong) #!/bin/bash
+text=$(glop msg get pong text)
+if [ -n "${text}" ]; then
+	echo "pong text: ${text}"
+fi
+glop msg send self ping text="from pong"
+echo pong
+glop msg pop pong
+!#

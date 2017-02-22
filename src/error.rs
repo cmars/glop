@@ -20,6 +20,7 @@ pub enum Error {
     Exec(i32, String),
     UnsupportedAction,
     AgentExists(String),
+    UndeliverableMessage(String),
 }
 
 impl From<clap::Error> for Error {
@@ -73,6 +74,7 @@ impl std::fmt::Display for Error {
             Error::Exec(code, ref stderr) => write!(f, "script exit code {}: {}", code, stderr),
             Error::UnsupportedAction => write!(f, "unsupported action"),
             Error::AgentExists(ref name) => write!(f, "agent {} already added", name),
+            Error::UndeliverableMessage(ref dst) => write!(f, "undeliverable message to {}", dst),
         }
     }
 }
@@ -92,6 +94,7 @@ impl std::error::Error for Error {
             Error::Exec(_, ref stderr) => stderr,
             Error::UnsupportedAction => "unsupported action",
             Error::AgentExists(ref name) => name,
+            Error::UndeliverableMessage(ref dst) => dst,
         }
     }
 

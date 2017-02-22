@@ -48,6 +48,7 @@ impl Transaction {
                     vec![action.clone()]
                 }
                 Action::Script(ref contents) => self.exec_script(contents)?,
+                Action::SendMsg { dst: _, topic: _, contents: _ } => vec![action.clone()],
             };
             applied.append(&mut resulting_actions);
         }

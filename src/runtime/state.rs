@@ -58,6 +58,7 @@ impl<S: Storage> State<S> {
         let mut txn = txn;
         let mut vars = self.storage.vars().clone();
         let mut popped = HashSet::new();
+        let mut self_msgs = HashMap::new();
         let actions = txn.apply()?;
         for action in actions {
             debug!(target: "State.commit", "action {:?}", action);
@@ -71,6 +72,12 @@ impl<S: Storage> State<S> {
                 &Action::PopMsg(ref topic) => {
                     popped.insert(topic.to_string());
                 }
+                &Action::SendMsg { ref dst, ref topic, ref contents } => {
+                    if dst != "self" {
+                        return Err(Error::UndeliverableMessage(dst.to_string()));
+                    }
+                    self_msgs.insert(topic.to_string(), contents.clone());
+                }
                 _ => return Err(Error::UnsupportedAction),
             };
         }
@@ -79,6 +86,9 @@ impl<S: Storage> State<S> {
             if !popped.contains(&topic) {
                 self.storage.push_msg(&topic, msg)?;
             }
+        }
+        for (topic, msg) in self_msgs {
+            self.storage.push_msg(&topic, msg)?;
         }
         self.storage.save(txn.seq, vars)?;
         debug!("State.commit: OK transaction seq={}", txn.seq);

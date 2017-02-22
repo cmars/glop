@@ -63,7 +63,12 @@ fn main() {
                 .arg(Arg::with_name("KEY").index(2).required(true)))
             .subcommand(SubCommand::with_name("pop")
                 .about("pop message in current context")
-                .arg(Arg::with_name("TOPIC").index(1).required(true))))
+                .arg(Arg::with_name("TOPIC").index(1).required(true)))
+            .subcommand(SubCommand::with_name("send")
+                .about("send a message to an agent")
+                .arg(Arg::with_name("NAME").index(1).required(true))
+                .arg(Arg::with_name("TOPIC").index(2).required(true))
+                .arg(Arg::with_name("CONTENTS").index(3).multiple(true).required(false))))
         .subcommand(SubCommand::with_name("agent")
             .about("manage the agent server")
             .subcommand(SubCommand::with_name("add")
@@ -104,6 +109,7 @@ fn main() {
                 match sub_m.subcommand_name() {
                     Some("get") => cmd_getmsg(sub_m.subcommand_matches("get").unwrap()),
                     Some("pop") => cmd_popmsg(sub_m.subcommand_matches("pop").unwrap()),
+                    Some("send") => cmd_send_script(sub_m.subcommand_matches("send").unwrap()),
                     Some(subcmd) => {
                         error!("unsupported command {}", subcmd);
                         Err(Error::CLI(clap::Error::with_description("unsupported command",
@@ -119,7 +125,7 @@ fn main() {
                     Some("add") => cmd_add(sub_m.subcommand_matches("add").unwrap()),
                     Some("remove") => cmd_remove(sub_m.subcommand_matches("remove").unwrap()),
                     Some("list") => cmd_list(sub_m.subcommand_matches("list").unwrap()),
-                    Some("send") => cmd_send(sub_m.subcommand_matches("send").unwrap()),
+                    Some("send") => cmd_send_agent(sub_m.subcommand_matches("send").unwrap()),
                     Some(subcmd) => {
                         error!("unsupported command {}", subcmd);
                         Err(Error::CLI(clap::Error::with_description("unsupported command",
@@ -336,22 +342,12 @@ fn cmd_list<'a>(_app_m: &ArgMatches<'a>) -> AppResult<()> {
     }
 }
 
-fn cmd_send<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
+fn cmd_send_agent<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let mut core = Core::new()?;
     let handle = core.handle();
     let addr_str = agent::read_agent_addr().map_err(Error::IO)?;
     let addr = addr_str.parse().map_err(Error::AddrParse)?;
-    let contents = match app_m.values_of("CONTENTS") {
-        Some(values) => {
-            let mut result = HashMap::new();
-            for kvpair in values {
-                let kvs = kvpair.split("=").collect::<Vec<_>>();
-                result.insert(kvs[0].to_string(), kvs[1].to_string());
-            }
-            result
-        }
-        None => HashMap::new(),
-    };
+    let contents = kv_map(app_m.values_of("CONTENTS"));
     let req = agent::Request::SendTo(agent::Envelope {
         dst: app_m.value_of("NAME").unwrap().to_string(),
         topic: app_m.value_of("TOPIC").unwrap().to_string(),
@@ -364,5 +360,39 @@ fn cmd_send<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
         agent::Response::SendTo => Ok(()),
         agent::Response::Error(msg) => Err(Error::ErrorResponse(msg)),
         _ => Err(Error::BadResponse),
+    }
+}
+
+fn cmd_send_script<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
+    let mut core = Core::new()?;
+    let handle = core.handle();
+    let addr_str = std::env::var("ADDR").map_err(Error::Env)?;
+    let addr = addr_str.parse().map_err(Error::AddrParse)?;
+    let contents = kv_map(app_m.values_of("CONTENTS"));
+    let req = runtime::ScriptRequest::SendMsg {
+        dst: app_m.value_of("NAME").unwrap().to_string(),
+        topic: app_m.value_of("TOPIC").unwrap().to_string(),
+        contents: value::Value::from_flat_map(contents),
+    };
+    let builder = TcpClient::new(runtime::ScriptClientProto);
+    let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
+        .map_err(Error::IO)?;
+    match resp {
+        runtime::ScriptResponse::SendMsg { dst: _, topic: _ } => Ok(()),
+        _ => Err(Error::BadResponse),
+    }
+}
+
+fn kv_map<'a>(maybe_args: Option<clap::Values<'a>>) -> HashMap<String, String> {
+    match maybe_args {
+        Some(values) => {
+            let mut result = HashMap::new();
+            for kvpair in values {
+                let kvs = kvpair.split("=").collect::<Vec<_>>();
+                result.insert(kvs[0].to_string(), kvs[1].to_string());
+            }
+            result
+        }
+        None => HashMap::new(),
     }
 }

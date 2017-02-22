@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use super::*;
-use value::{Value, Identifier};
+use value::{Identifier, Obj, Value};
 
 #[derive(Clone, Debug)]
 pub struct Match {
@@ -93,6 +93,11 @@ pub enum Action {
     UnsetVar(Identifier),
     PopMsg(String),
     Script(String),
+    SendMsg {
+        dst: String,
+        topic: String,
+        contents: Obj,
+    },
 }
 
 impl Action {

@@ -17,7 +17,7 @@ use self::tokio_service::Service;
 
 use super::*;
 use self::context::Context;
-use self::value::{Value, Identifier};
+use self::value::{Identifier, Obj, Value};
 
 pub struct ClientCodec;
 pub struct ServiceCodec;
@@ -30,6 +30,11 @@ pub enum Request {
     UnsetVar { key: String },
     GetMsg { topic: String, key: String },
     PopMsg { topic: String },
+    SendMsg {
+        dst: String,
+        topic: String,
+        contents: Obj,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -44,6 +49,7 @@ pub enum Response {
         value: String,
     },
     PopMsg { topic: String },
+    SendMsg { dst: String, topic: String },
 }
 
 impl Codec for ServiceCodec {
@@ -244,6 +250,20 @@ impl Service for ScriptService {
                 actions.push(Action::PopMsg(topic.to_string()));
                 drop(actions);
                 Response::PopMsg { topic: topic.to_string() }
+            }
+            Request::SendMsg { ref dst, ref topic, ref contents } => {
+                drop(ctx);
+                let mut actions = self.actions.lock().unwrap();
+                actions.push(Action::SendMsg {
+                    dst: dst.to_string(),
+                    topic: topic.to_string(),
+                    contents: contents.clone(),
+                });
+                drop(actions);
+                Response::SendMsg {
+                    dst: dst.to_string(),
+                    topic: topic.to_string(),
+                }
             }
         };
         future::ok(res).boxed()
