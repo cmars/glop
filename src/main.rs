@@ -349,6 +349,7 @@ fn cmd_send_agent<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let addr = addr_str.parse().map_err(Error::AddrParse)?;
     let contents = kv_map(app_m.values_of("CONTENTS"));
     let req = agent::Request::SendTo(agent::Envelope {
+        src: "user".to_string(),
         dst: app_m.value_of("NAME").unwrap().to_string(),
         topic: app_m.value_of("TOPIC").unwrap().to_string(),
         contents: value::Value::from_flat_map(contents),

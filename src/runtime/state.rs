@@ -21,13 +21,28 @@ pub trait Storage {
     fn seq(&self) -> i32;
 }
 
+pub trait Outbox {
+    fn send_msg(&self, dst: &str, topic: &str, contents: &Obj) -> Result<()>;
+}
+
 pub struct State<S: Storage> {
     storage: S,
+    outbox: Box<Outbox + Send + 'static>,
 }
 
 impl<S: Storage> State<S> {
     pub fn new(storage: S) -> State<S> {
-        State { storage: storage }
+        State {
+            storage: storage,
+            outbox: Box::new(UndeliverableOutbox) as Box<Outbox + Send>,
+        }
+    }
+
+    pub fn new_outbox(storage: S, outbox: Box<Outbox + Send + 'static>) -> State<S> {
+        State {
+            storage: storage,
+            outbox: outbox,
+        }
     }
 
     pub fn storage(&self) -> &S {
@@ -73,10 +88,11 @@ impl<S: Storage> State<S> {
                     popped.insert(topic.to_string());
                 }
                 &Action::SendMsg { ref dst, ref topic, ref contents } => {
-                    if dst != "self" {
-                        return Err(Error::UndeliverableMessage(dst.to_string()));
+                    if dst == "self" {
+                        self_msgs.insert(topic.to_string(), contents.clone());
+                    } else {
+                        self.outbox.send_msg(dst, topic, contents)?;
                     }
-                    self_msgs.insert(topic.to_string(), contents.clone());
                 }
                 _ => return Err(Error::UnsupportedAction),
             };
@@ -102,6 +118,14 @@ impl<S: Storage> State<S> {
             self.storage.push_msg(&topic, msg)?;
         }
         Ok(())
+    }
+}
+
+pub struct UndeliverableOutbox;
+
+impl Outbox for UndeliverableOutbox {
+    fn send_msg(&self, dst: &str, _topic: &str, _contents: &Obj) -> Result<()> {
+        Err(Error::UndeliverableMessage(dst.to_string()))
     }
 }
 

@@ -11,7 +11,7 @@ mod transaction;
 
 pub use self::error::{Error, Result};
 pub use self::model::{Action, Condition, CmpOpcode, Match};
-pub use self::state::{DurableStorage, MemStorage, State, Storage};
+pub use self::state::{DurableStorage, MemStorage, Outbox, State, Storage};
 pub use self::script::Request as ScriptRequest;
 pub use self::script::Response as ScriptResponse;
 pub use self::script::ClientProto as ScriptClientProto;
