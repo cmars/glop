@@ -1,11 +1,9 @@
-// This agent should be called "ponger"
-
 when (message init) #!/bin/bash
 glop msg pop init
 !#
 
-when (message pong) #!/bin/bash
+when (message pong from ponger as pinger) #!/bin/bash
 echo "pong"
-glop msg send pinger ping
+glop msg send ponger ping
 glop msg pop pong
 !#

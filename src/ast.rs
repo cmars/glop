@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::ops::Deref;
 
 #[derive(Serialize, Deserialize)]
@@ -11,6 +12,26 @@ pub struct Glop {
 pub struct Match {
     pub conditions: Vec<Condition>,
     pub actions: Vec<Action>,
+    pub acting_roles: HashSet<String>,
+}
+
+pub fn acting_roles(conditions: &Vec<Condition>) -> HashSet<String> {
+    conditions.iter()
+        .map(|c| {
+            if let &Condition::Message { topic: _, peer_role: _, ref acting_role } = c {
+                if let &Some(ref role) = acting_role {
+                    return Some(role.to_string());
+                }
+            }
+            None
+        })
+        .filter(|maybe_role| if let &Some(_) = maybe_role {
+            true
+        } else {
+            false
+        })
+        .map(|maybe_role| maybe_role.unwrap().to_string())
+        .collect()
 }
 
 pub type Identifier = Vec<String>;
@@ -21,7 +42,11 @@ pub enum Condition {
     Cmp(Identifier, CmpOpcode, String),
     IsSet(Identifier),
     IsUnset(Identifier),
-    Message(String),
+    Message {
+        topic: String,
+        peer_role: Option<String>,
+        acting_role: Option<String>,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -87,7 +112,16 @@ impl fmt::Display for Condition {
             &Condition::Cmp(ref l, ref op, ref r) => write!(f, "{} {} {}", FmtIdentifier(l), op, r),
             &Condition::IsSet(ref k) => write!(f, "is_set {}", FmtIdentifier(k)),
             &Condition::IsUnset(ref k) => write!(f, "is_unset {}", FmtIdentifier(k)),
-            &Condition::Message(ref k) => write!(f, "message {}", k),
+            &Condition::Message { ref topic, ref peer_role, ref acting_role } => {
+                write!(f, "message {}", topic)?;
+                if let &Some(ref peer) = peer_role {
+                    write!(f, " from {}", peer)?;
+                }
+                if let &Some(ref acting) = acting_role {
+                    write!(f, " as {}", acting)?;
+                }
+                Ok(())
+            }
         }
     }
 }

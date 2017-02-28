@@ -10,10 +10,20 @@ matches -> Vec<Match>
 
 match -> Match
     = "when" __ "(" __ c:conditions __ ")" __ "{" __ a:actions __ "}" {
-        Match{ conditions: c, actions: a }
+		let ar = acting_roles(&c);
+        Match{
+			conditions: c,
+			actions: a,
+			acting_roles: ar,
+		}
     }
     / "when" __ "(" __ c:conditions __ ")" __ v:$("#!" (!"!#" .)+) "!#" {
-		Match{ conditions: c, actions: vec![Action::Script(String::from(v))] }
+		let ar = acting_roles(&c);
+		Match{
+			conditions: c,
+			actions: vec![Action::Script(String::from(v))],
+			acting_roles: ar,
+		}
     }
 
 conditions -> Vec<Condition>
@@ -36,9 +46,23 @@ value -> String
     / "\"" v:$([^"]+) "\"" { String::from(v) }
 
 unaryfunc -> Condition
-    = "message" __ k:identifier { Condition::Message(k.join(".")) }
+    = "message" __ topic:identifier __ peer:maybePeerRole __ acting:maybeActingRole {
+		Condition::Message{
+			topic: topic.join("."),
+			peer_role: peer,
+			acting_role: acting,
+		}
+	}
     / "is_set" __ k:identifier { Condition::IsSet(k) }
     / "is_unset" __ k:identifier { Condition::IsUnset(k) }
+
+maybePeerRole -> Option<String>
+	= "from" __ role:idpart { Some(role) }
+	/ { None }
+
+maybeActingRole -> Option<String>
+	= "as" __ role:idpart { Some(role) }
+	/ { None }
 
 cmpop -> CmpOpcode
     = "==" { CmpOpcode::Equal }

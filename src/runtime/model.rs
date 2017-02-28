@@ -8,6 +8,7 @@ pub struct Match {
     pub conditions: Vec<Condition>,
     pub msg_topics: HashSet<String>,
     pub actions: Vec<Action>,
+    pub acting_roles: HashSet<String>,
 }
 
 impl Match {
@@ -16,23 +17,24 @@ impl Match {
             conditions: vec![],
             msg_topics: HashSet::new(),
             actions: vec![],
+            acting_roles: HashSet::new(),
         }
     }
 
     pub fn new_from_ast(m_ast: &ast::Match) -> Match {
         let mut m_exc = Match::new();
-        for c_ast in &m_ast.conditions {
-            m_exc.conditions.push(Condition::new(c_ast));
-            match c_ast {
-                &ast::Condition::Message(ref topic) => {
+        m_exc.conditions = m_ast.conditions
+            .iter()
+            .map(|c_ast| {
+                if let &ast::Condition::Message { ref topic, peer_role: _, acting_role: _ } =
+                    c_ast {
                     m_exc.msg_topics.insert(topic.to_string());
                 }
-                _ => (),
-            }
-        }
-        for a_ast in &m_ast.actions {
-            m_exc.actions.push(Action::new(a_ast));
-        }
+                Condition::new(c_ast)
+            })
+            .collect();
+        m_exc.actions = m_ast.actions.iter().map(|a_ast| Action::new(a_ast)).collect();
+        m_exc.acting_roles = m_ast.acting_roles.clone();
         m_exc
     }
 }
@@ -42,7 +44,11 @@ pub enum Condition {
     Cmp(Identifier, CmpOpcode, String),
     IsSet(Identifier),
     IsUnset(Identifier),
-    Message(String),
+    Message {
+        topic: String,
+        peer_role: Option<String>,
+        acting_role: Option<String>,
+    },
 }
 
 impl Condition {
@@ -53,7 +59,13 @@ impl Condition {
             }
             &ast::Condition::IsSet(ref k) => Condition::IsSet(Identifier::from_ast(k)),
             &ast::Condition::IsUnset(ref k) => Condition::IsUnset(Identifier::from_ast(k)),
-            &ast::Condition::Message(ref k) => Condition::Message(k.to_string()),
+            &ast::Condition::Message { ref topic, ref peer_role, ref acting_role } => {
+                Condition::Message {
+                    topic: topic.to_string(),
+                    peer_role: peer_role.clone(),
+                    acting_role: acting_role.clone(),
+                }
+            }
         }
     }
 }
