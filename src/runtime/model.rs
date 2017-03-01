@@ -8,7 +8,7 @@ pub struct Match {
     pub conditions: Vec<Condition>,
     pub msg_topics: HashSet<String>,
     pub actions: Vec<Action>,
-    pub acting_roles: HashSet<String>,
+    pub acting_role: Option<String>,
 }
 
 impl Match {
@@ -17,7 +17,7 @@ impl Match {
             conditions: vec![],
             msg_topics: HashSet::new(),
             actions: vec![],
-            acting_roles: HashSet::new(),
+            acting_role: None,
         }
     }
 
@@ -34,7 +34,7 @@ impl Match {
             })
             .collect();
         m_exc.actions = m_ast.actions.iter().map(|a_ast| Action::new(a_ast)).collect();
-        m_exc.acting_roles = m_ast.acting_roles.clone();
+        m_exc.acting_role = m_ast.acting_role.clone();
         m_exc
     }
 }

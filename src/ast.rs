@@ -12,7 +12,7 @@ pub struct Glop {
 pub struct Match {
     pub conditions: Vec<Condition>,
     pub actions: Vec<Action>,
-    pub acting_roles: HashSet<String>,
+    pub acting_role: Option<String>,
 }
 
 pub fn acting_roles(conditions: &Vec<Condition>) -> HashSet<String> {

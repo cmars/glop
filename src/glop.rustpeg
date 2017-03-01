@@ -9,20 +9,40 @@ matches -> Vec<Match>
     / m:match { vec![m] }
 
 match -> Match
-    = "when" __ "(" __ c:conditions __ ")" __ "{" __ a:actions __ "}" {
-		let ar = acting_roles(&c);
-        Match{
-			conditions: c,
-			actions: a,
-			acting_roles: ar,
+    = "when" __ "(" __ c:conditions __ ")" __ "{" __ a:actions __ "}" {?
+		let acting_roles_set = acting_roles(&c);
+		let acting_roles = acting_roles_set.iter().collect::<Vec<&String>>();
+		if acting_roles.len() > 1 {
+			Err("multiple acting roles in the same match is not supported")
+		} else {
+			let acting_role = if acting_roles.is_empty() {
+				None
+			} else {
+				Some(acting_roles[0].to_string())
+			};
+			Ok(Match{
+				conditions: c,
+				actions: a,
+				acting_role: acting_role,
+			})
 		}
     }
-    / "when" __ "(" __ c:conditions __ ")" __ v:$("#!" (!"!#" .)+) "!#" {
-		let ar = acting_roles(&c);
-		Match{
-			conditions: c,
-			actions: vec![Action::Script(String::from(v))],
-			acting_roles: ar,
+    / "when" __ "(" __ c:conditions __ ")" __ v:$("#!" (!"!#" .)+) "!#" {?
+		let acting_roles_set = acting_roles(&c);
+		let acting_roles = acting_roles_set.iter().collect::<Vec<&String>>();
+		if acting_roles.len() > 1 {
+			Err("multiple acting roles in the same match is not supported")
+		} else {
+			let acting_role = if acting_roles.is_empty() {
+				None
+			} else {
+				Some(acting_roles[0].to_string())
+			};
+			Ok(Match{
+				conditions: c,
+				actions: vec![Action::Script(String::from(v))],
+				acting_role: acting_role,
+			})
 		}
     }
 
