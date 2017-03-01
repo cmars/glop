@@ -64,6 +64,10 @@ impl<S: Storage> State<S> {
             Ok(Some(txn))
         } else {
             debug!("State.eval: MISSED");
+            let mut ctx = txn.ctx.lock().unwrap();
+            for (topic, msg) in ctx.msgs.drain() {
+                self.storage.push_msg(&topic, msg)?;
+            }
             Ok(None)
         }
     }

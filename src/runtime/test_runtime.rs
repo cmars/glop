@@ -11,6 +11,9 @@ use self::value::{Obj, Value};
 
 const SIMPLE_INIT: &'static str = r#"when (message init) { msg pop init; }"#;
 const TWO_MSGS: &'static str = r#"when (message foo, message bar) { msg pop foo; msg pop bar; }"#;
+const TWO_MSGS_UNACK: &'static str = r#"when (message foo, message bar) { var set baz bop; }"#;
+const TWO_MSGS_IS_SET: &'static str =
+    r#"when (message foo, message bar, is_set baz) { msg pop foo; msg pop bar; }"#;
 const SIMPLE_EQUAL: &'static str = r#"when (foo == bar) { var unset foo; }"#;
 const SIMPLE_NOT_EQUAL: &'static str = r#"when (foo != bar) { var set foo bar; }"#;
 const SIMPLE_IS_SET: &'static str = r#"when (is_set foo) { var unset foo; }"#;
@@ -471,4 +474,65 @@ fn match_is_set<T: Storage>(f: StateFactory<T>) {
             None => {}
         }
     }
+}
+
+#[test]
+fn mem_preserve_unmatched_message() {
+    preserve_unmatched_message(mem_state)
+}
+
+#[test]
+fn durable_preserve_unmatched_message() {
+    preserve_unmatched_message(durable_state)
+}
+
+fn preserve_unmatched_message<T: Storage>(f: StateFactory<T>) {
+    setup();
+    let m_exc_tm = Match::new_from_ast(&parse_one_match(TWO_MSGS));
+    let m_exc_tmua = Match::new_from_ast(&parse_one_match(TWO_MSGS_UNACK));
+    let m_exc_tmis = Match::new_from_ast(&parse_one_match(TWO_MSGS_IS_SET));
+    let (st, _cleanup) = f();
+    let mut st = st;
+    // st.mut_storage()
+    // save(0,
+    // ("foo".to_string(), Value::from_str("blah"))].iter().cloned().collect())
+    // unwrap();
+    st.mut_storage().push_msg("foo", Obj::new()).unwrap();
+    st.mut_storage().push_msg("bar", Obj::new()).unwrap();
+    // Doesn't match because baz is not set
+    match st.eval(m_exc_tmis.clone()).unwrap() {
+        Some(_) => panic!("unexpected match"),
+        None => {}
+    };
+    // Matches foo and bar messages but does not pop them
+    let mut txn = match st.eval(m_exc_tmua.clone()).unwrap() {
+        Some(txn) => {
+            assert_eq!(txn.seq, 0);
+            txn
+        }
+        None => panic!("expected match"),
+    };
+    assert!(st.commit(&mut txn).is_ok());
+    // Matches foo and bar messages with baz now set
+    let mut txn = match st.eval(m_exc_tmis.clone()).unwrap() {
+        Some(txn) => {
+            assert_eq!(txn.seq, 1);
+            txn
+        }
+        None => panic!("expected match"),
+    };
+    assert!(st.commit(&mut txn).is_ok());
+    // Now the messages are gone
+    match st.eval(m_exc_tm.clone()).unwrap() {
+        Some(_) => panic!("unexpected match"),
+        None => {}
+    };
+    match st.eval(m_exc_tmis.clone()).unwrap() {
+        Some(_) => panic!("unexpected match"),
+        None => {}
+    };
+    match st.eval(m_exc_tmua.clone()).unwrap() {
+        Some(_) => panic!("unexpected match"),
+        None => {}
+    };
 }
