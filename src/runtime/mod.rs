@@ -10,7 +10,7 @@ mod state;
 mod transaction;
 
 pub use self::error::{Error, Result};
-pub use self::model::{Action, Condition, CmpOpcode, Match};
+pub use self::model::{Action, Condition, CmpOpcode, Match, MessageFilter};
 pub use self::state::{DurableStorage, MemStorage, Outbox, State, Storage};
 pub use self::script::Request as ScriptRequest;
 pub use self::script::Response as ScriptResponse;

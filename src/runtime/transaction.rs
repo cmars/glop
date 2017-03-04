@@ -73,8 +73,12 @@ impl Transaction {
             }
             &Condition::IsSet(ref k) => k.is_set(&ctx.vars),
             &Condition::IsUnset(ref k) => !k.is_set(&ctx.vars),
-            &Condition::Message { ref topic, peer_role: _, acting_role: _ } => {
-                ctx.msgs.contains_key(topic)
+            &Condition::Message { ref topic, ref src_role, acting_role: _ } => {
+                if let Some(msg) = ctx.msgs.get(topic) {
+                    src_role.eq(&msg.src_role)
+                } else {
+                    false
+                }
             }
         }
     }

@@ -24,7 +24,7 @@ use super::cleanup;
 use super::error::{Error, to_ioerror};
 use super::grammar;
 use super::runtime;
-use super::value::Obj;
+use super::value::{Message, Obj};
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug)]
@@ -32,8 +32,8 @@ pub enum Request {
     Add { source: String, name: String },
     Remove { name: String },
     List,
-    SendTo(Envelope), /* RecvFrom { handle: String },
-                       * Introduce { names: Vec<String> }, */
+    SendTo(Message), /* RecvFrom { handle: String },
+                      * Introduce { names: Vec<String> }, */
 }
 
 #[derive(Serialize, Deserialize)]
@@ -144,31 +144,30 @@ impl tokio_core::io::Codec for ClientCodec {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-#[derive(Debug)]
-pub struct Envelope {
-    pub src: String,
-    pub dst: String,
-    pub topic: String,
-    pub contents: Obj,
-}
-
 pub struct Agent<S: runtime::Storage> {
     matches: Vec<runtime::Match>,
     st: runtime::State<S>,
-    receiver: mpsc::Receiver<Envelope>,
+    receiver: mpsc::Receiver<Message>,
     match_index: usize,
 }
 
 impl<S: runtime::Storage> Agent<S> {
     pub fn new(glop: &ast::Glop,
                st: runtime::State<S>,
-               receiver: mpsc::Receiver<Envelope>)
+               receiver: mpsc::Receiver<Message>)
                -> Result<Agent<S>, Error> {
+        let name = st.name().to_string();
         let mut st = st;
         let (seq, _) = st.mut_storage().load()?;
         if seq == 0 {
-            st.mut_storage().push_msg("init", Obj::new())?;
+            st.mut_storage()
+                .push_msg(Message {
+                    src: "".to_string(),
+                    src_role: None,
+                    topic: "init".to_string(),
+                    dst: name,
+                    contents: Obj::new(),
+                })?;
         }
         let m_excs = glop.matches
             .iter()
@@ -214,8 +213,8 @@ impl<S: runtime::Storage> futures::stream::Stream for Agent<S> {
     fn poll(&mut self) -> futures::Poll<Option<Self::Item>, Self::Error> {
         // TODO: poll mpsc channel (receiver end) for state changes & apply?
         match self.receiver.poll() {
-            Ok(futures::Async::Ready(Some(env))) => {
-                self.st.mut_storage().push_msg(&env.topic, env.contents)?;
+            Ok(futures::Async::Ready(Some(msg))) => {
+                self.st.mut_storage().push_msg(msg)?;
             }
             Ok(futures::Async::Ready(None)) => return Ok(futures::Async::Ready(None)),
             Ok(futures::Async::NotReady) => {}
@@ -234,7 +233,7 @@ fn read_file(path: &str) -> Result<String, Error> {
     Ok(s)
 }
 
-type AgentOutboxMap = HashMap<String, mpsc::Sender<Envelope>>;
+type AgentOutboxMap = HashMap<String, mpsc::Sender<Message>>;
 
 struct ServiceState<S: Storage + Send + 'static> {
     storage: S,
@@ -349,12 +348,12 @@ impl<S: Storage + Send> Service<S> {
                 Response::Remove
             }
             Request::List => Response::List { names: state.outboxes.keys().cloned().collect() },
-            Request::SendTo(env) => {
-                let sender = match state.outboxes.get(&env.dst) {
+            Request::SendTo(msg) => {
+                let sender = match state.outboxes.get(&msg.dst) {
                     Some(s) => s.clone(),
-                    None => return Ok(Response::Error(format!("agent {} not found", &env.dst))),
+                    None => return Ok(Response::Error(format!("agent {} not found", &msg.dst))),
                 };
-                self.handle.spawn(sender.send(env).then(|_| Ok(())));
+                self.handle.spawn(sender.send(msg).then(|_| Ok(())));
                 Response::SendTo
             }
             // RecvFrom { handle: String },
@@ -393,10 +392,10 @@ impl Storage for MemStorage {
     type RuntimeStorage = runtime::MemStorage;
 
     fn new_state(&self,
-                 _name: &str,
+                 name: &str,
                  outbox: Box<runtime::Outbox + Send + 'static>)
                  -> Result<runtime::State<Self::RuntimeStorage>, Error> {
-        Ok(runtime::State::new_outbox(runtime::MemStorage::new(), outbox))
+        Ok(runtime::State::new_outbox(name, runtime::MemStorage::new(), outbox))
     }
 
     fn add(&mut self, name: String, glop: ast::Glop) -> Result<(), Error> {
@@ -476,7 +475,7 @@ impl Storage for DurableStorage {
             .unwrap()
             .to_string();
         let runtime_storage = runtime::DurableStorage::new(&runtime_path)?;
-        Ok(runtime::State::new_outbox(runtime_storage, outbox))
+        Ok(runtime::State::new_outbox(name, runtime_storage, outbox))
     }
 
     fn add(&mut self, name: String, glop: ast::Glop) -> Result<(), Error> {
@@ -507,19 +506,13 @@ struct SenderOutbox<S: Storage + Send + 'static> {
 }
 
 impl<S: Storage + Send> runtime::Outbox for SenderOutbox<S> {
-    fn send_msg(&self, dst: &str, topic: &str, contents: &Obj) -> Result<(), Error> {
+    fn send_msg(&self, msg: Message) -> Result<(), Error> {
         let state = self.state.lock().unwrap();
-        let env = Envelope {
-            src: self.src.to_string(),
-            dst: dst.to_string(),
-            topic: topic.to_string(),
-            contents: contents.clone(),
-        };
-        let sender = match state.outboxes.get(dst) {
+        let sender = match state.outboxes.get(&msg.dst) {
             Some(s) => s.clone(),
-            None => return Err(Error::InvalidArgument(dst.to_string())),
+            None => return Err(Error::InvalidArgument(msg.dst.to_string())),
         };
-        self.remote.spawn(|_| sender.send(env).then(|_| Ok(())));
+        self.remote.spawn(|_| sender.send(msg).then(|_| Ok(())));
         Ok(())
     }
 }

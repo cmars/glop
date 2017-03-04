@@ -88,6 +88,16 @@ impl Value {
 
 pub type Obj = HashMap<String, Value>;
 
+#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug)]
+pub struct Message {
+    pub src: String,
+    pub src_role: Option<String>,
+    pub dst: String,
+    pub topic: String,
+    pub contents: Obj,
+}
+
 pub type Env = HashMap<String, String>;
 
 #[derive(Serialize, Deserialize)]

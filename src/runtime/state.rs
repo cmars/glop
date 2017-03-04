@@ -8,41 +8,50 @@ use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use super::*;
 use self::context::Context;
 use self::transaction::Transaction;
-use self::value::{Obj, Value};
+use self::value::{Message, Value};
 
 pub trait Storage {
     fn load(&mut self) -> Result<(i32, HashMap<String, Value>)>;
     fn save(&mut self, seq: i32, vars: HashMap<String, Value>) -> Result<()>;
 
-    fn next_messages(&mut self, topics: &HashSet<String>) -> Result<HashMap<String, Obj>>;
-    fn push_msg(&mut self, topic: &str, msg: Obj) -> Result<()>;
+    fn next_messages(&mut self,
+                     filters: &HashSet<MessageFilter>)
+                     -> Result<HashMap<String, Message>>;
+    fn push_msg(&mut self, msg: Message) -> Result<()>;
 
     fn vars(&self) -> &HashMap<String, Value>;
     fn seq(&self) -> i32;
 }
 
 pub trait Outbox {
-    fn send_msg(&self, dst: &str, topic: &str, contents: &Obj) -> Result<()>;
+    fn send_msg(&self, msg: Message) -> Result<()>;
 }
 
 pub struct State<S: Storage> {
+    src: String,
     storage: S,
     outbox: Box<Outbox + Send + 'static>,
 }
 
 impl<S: Storage> State<S> {
-    pub fn new(storage: S) -> State<S> {
+    pub fn new(src: &str, storage: S) -> State<S> {
         State {
+            src: src.to_string(),
             storage: storage,
             outbox: Box::new(UndeliverableOutbox) as Box<Outbox + Send>,
         }
     }
 
-    pub fn new_outbox(storage: S, outbox: Box<Outbox + Send + 'static>) -> State<S> {
+    pub fn new_outbox(src: &str, storage: S, outbox: Box<Outbox + Send + 'static>) -> State<S> {
         State {
+            src: src.to_string(),
             storage: storage,
             outbox: outbox,
         }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.src
     }
 
     pub fn storage(&self) -> &S {
@@ -56,7 +65,7 @@ impl<S: Storage> State<S> {
     pub fn eval(&mut self, m: Match) -> Result<Option<Transaction>> {
         debug!("State.eval: {:?}", &m);
         let (seq, vars) = self.storage.load()?;
-        let msgs = self.storage.next_messages(&m.msg_topics)?;
+        let msgs = self.storage.next_messages(&m.msg_filters)?;
         let ctx = Context::new(vars, msgs);
         let txn = Transaction::new(m, seq, ctx);
         if txn.eval() {
@@ -65,8 +74,8 @@ impl<S: Storage> State<S> {
         } else {
             debug!("State.eval: MISSED");
             let mut ctx = txn.ctx.lock().unwrap();
-            for (topic, msg) in ctx.msgs.drain() {
-                self.storage.push_msg(&topic, msg)?;
+            for (_topic, msg) in ctx.msgs.drain() {
+                self.storage.push_msg(msg)?;
             }
             Ok(None)
         }
@@ -77,7 +86,7 @@ impl<S: Storage> State<S> {
         let mut txn = txn;
         let mut vars = self.storage.vars().clone();
         let mut popped = HashSet::new();
-        let mut self_msgs = HashMap::new();
+        let mut self_msgs = Vec::new();
         let actions = txn.apply()?;
         for action in actions {
             debug!(target: "State.commit", "action {:?}", action);
@@ -92,10 +101,18 @@ impl<S: Storage> State<S> {
                     popped.insert(topic.to_string());
                 }
                 &Action::SendMsg { ref dst, ref topic, ref contents } => {
+                    let msg = Message {
+                        src: self.src.to_string(),
+                        src_role: txn.m.acting_role.clone(),
+                        dst: dst.to_string(),
+                        topic: topic.to_string(),
+                        contents: contents.clone(),
+                    };
                     if dst == "self" {
-                        self_msgs.insert(topic.to_string(), contents.clone());
+                        self_msgs.push(msg);
                     } else {
-                        self.outbox.send_msg(dst, topic, contents)?;
+                        self.outbox
+                            .send_msg(msg)?;
                     }
                 }
                 _ => return Err(Error::UnsupportedAction),
@@ -104,11 +121,11 @@ impl<S: Storage> State<S> {
         let msgs = txn.with_context(|ctx| ctx.msgs.clone());
         for (topic, msg) in msgs {
             if !popped.contains(&topic) {
-                self.storage.push_msg(&topic, msg)?;
+                self.storage.push_msg(msg)?;
             }
         }
-        for (topic, msg) in self_msgs {
-            self.storage.push_msg(&topic, msg)?;
+        for msg in self_msgs {
+            self.storage.push_msg(msg)?;
         }
         self.storage.save(txn.seq, vars)?;
         debug!("State.commit: OK transaction seq={}", txn.seq);
@@ -118,8 +135,8 @@ impl<S: Storage> State<S> {
     pub fn rollback(&mut self, txn: Transaction) -> Result<()> {
         let mut txn = txn;
         let msgs = txn.with_context(|ctx| ctx.msgs.clone());
-        for (topic, msg) in msgs {
-            self.storage.push_msg(&topic, msg)?;
+        for (_topic, msg) in msgs {
+            self.storage.push_msg(msg)?;
         }
         Ok(())
     }
@@ -128,15 +145,15 @@ impl<S: Storage> State<S> {
 pub struct UndeliverableOutbox;
 
 impl Outbox for UndeliverableOutbox {
-    fn send_msg(&self, dst: &str, _topic: &str, _contents: &Obj) -> Result<()> {
-        Err(Error::UndeliverableMessage(dst.to_string()))
+    fn send_msg(&self, msg: Message) -> Result<()> {
+        Err(Error::UndeliverableMessage(msg.dst.to_string()))
     }
 }
 
 pub struct MemStorage {
     seq: i32,
     vars: HashMap<String, Value>,
-    msgs: HashMap<String, Vec<Obj>>,
+    msgs: HashMap<MessageFilter, Vec<Message>>,
 }
 
 impl MemStorage {
@@ -164,15 +181,17 @@ impl Storage for MemStorage {
         Ok(())
     }
 
-    fn next_messages(&mut self, topics: &HashSet<String>) -> Result<HashMap<String, Obj>> {
-        let mut next: HashMap<String, Obj> = HashMap::new();
+    fn next_messages(&mut self,
+                     filters: &HashSet<MessageFilter>)
+                     -> Result<HashMap<String, Message>> {
+        let mut next: HashMap<String, Message> = HashMap::new();
         for (k, v) in &mut self.msgs {
-            if !topics.contains(k) {
+            if !filters.contains(k) {
                 continue;
             }
             match v.pop() {
                 Some(msg) => {
-                    next.insert(k.to_string(), msg.clone());
+                    next.insert(k.topic.to_string(), msg.clone());
                 }
                 None => (),
             }
@@ -180,15 +199,16 @@ impl Storage for MemStorage {
         Ok(next)
     }
 
-    fn push_msg(&mut self, topic: &str, msg: Obj) -> Result<()> {
-        match self.msgs.get_mut(topic) {
-            Some(v) => {
-                v.push(msg);
-                return Ok(());
-            }
-            _ => {}
+    fn push_msg(&mut self, msg: Message) -> Result<()> {
+        let k = MessageFilter {
+            topic: msg.topic.to_string(),
+            src_role: msg.src_role.clone(),
+        };
+        if let Some(v) = self.msgs.get_mut(&k) {
+            v.push(msg);
+            return Ok(());
         }
-        self.msgs.insert(topic.to_string(), vec![msg]);
+        self.msgs.insert(k, vec![msg]);
         Ok(())
     }
 
@@ -212,7 +232,7 @@ pub struct DurableStorage {
     checkpoint_path: String,
     checkpoint: DurableCheckpoint,
     topics_path: String,
-    topics: HashMap<String, spoolq::Queue<Obj>>,
+    topics: HashMap<String, spoolq::Queue<Message>>,
 }
 
 impl DurableStorage {
@@ -234,6 +254,15 @@ impl DurableStorage {
             topics: HashMap::new(),
             topics_path: topics_path,
         })
+    }
+
+    fn new_queue(&self, topic: &str) -> Result<spoolq::Queue<Message>> {
+        let q_path = std::path::PathBuf::from(&self.topics_path)
+            .join(topic)
+            .to_str()
+            .unwrap()
+            .to_string();
+        spoolq::Queue::<Message>::new(&q_path).map_err(error::Error::IO)
     }
 }
 
@@ -283,35 +312,30 @@ impl Storage for DurableStorage {
         Ok(())
     }
 
-    fn next_messages(&mut self, topics: &HashSet<String>) -> Result<HashMap<String, Obj>> {
-        let mut next: HashMap<String, Obj> = HashMap::new();
-        for k in topics {
-            let q = match self.topics.get_mut(k) {
-                Some(q) => q,
-                None => continue,
-            };
+    fn next_messages(&mut self,
+                     filters: &HashSet<MessageFilter>)
+                     -> Result<HashMap<String, Message>> {
+        let mut next: HashMap<String, Message> = HashMap::new();
+        for k in filters {
+            if !self.topics.contains_key(&k.topic) {
+                let q = self.new_queue(&k.topic)?;
+                self.topics.insert(k.topic.to_string(), q);
+            }
+            let q = self.topics.get_mut(&k.topic).unwrap();
             let maybe_msg = q.pop().map_err(error::Error::IO)?;
-            match maybe_msg {
-                Some(msg) => {
-                    next.insert(k.to_string(), msg);
-                }
-                None => {}
-            };
+            if let Some(msg) = maybe_msg {
+                next.insert(k.topic.to_string(), msg);
+            }
         }
         Ok(next)
     }
 
-    fn push_msg(&mut self, topic: &str, msg: Obj) -> Result<()> {
-        if !self.topics.contains_key(topic) {
-            let q_path = std::path::PathBuf::from(&self.topics_path)
-                .join(topic)
-                .to_str()
-                .unwrap()
-                .to_string();
-            let q = spoolq::Queue::<Obj>::new(&q_path)?;
-            self.topics.insert(topic.to_string(), q);
+    fn push_msg(&mut self, msg: Message) -> Result<()> {
+        if !self.topics.contains_key(&msg.topic) {
+            let q = self.new_queue(&msg.topic)?;
+            self.topics.insert(msg.topic.to_string(), q);
         }
-        let q = self.topics.get_mut(topic).unwrap();
+        let q = self.topics.get_mut(&msg.topic).unwrap();
         q.push(msg).map_err(error::Error::IO)
     }
 

@@ -2,16 +2,16 @@ use std;
 use std::collections::{HashMap, HashSet};
 use std::process::Command;
 
-use super::value::{Identifier, Obj, Value};
+use super::value::{Identifier, Message, Value};
 
 pub struct Context {
     pub vars: HashMap<String, Value>,
-    pub msgs: HashMap<String, Obj>,
+    pub msgs: HashMap<String, Message>,
     pub popped_topics: HashSet<String>,
 }
 
 impl Context {
-    pub fn new(vars: HashMap<String, Value>, msgs: HashMap<String, Obj>) -> Context {
+    pub fn new(vars: HashMap<String, Value>, msgs: HashMap<String, Message>) -> Context {
         Context {
             vars: vars,
             msgs: msgs,
@@ -24,7 +24,7 @@ impl Context {
             cmd.env(k, v);
         }
         for (topic, msg) in &self.msgs {
-            for (k, v) in Value::to_env(&msg) {
+            for (k, v) in Value::to_env(&msg.contents) {
                 cmd.env(vec![topic.clone(), k.to_string()].join("__"), v);
             }
         }
@@ -38,7 +38,7 @@ impl Context {
 
     pub fn get_msg<'a>(&'a mut self, topic: &str, key: &Identifier) -> Option<&'a Value> {
         match self.msgs.get(topic) {
-            Some(ref obj) => key.get(obj),
+            Some(ref msg) => key.get(&msg.contents),
             None => None,
         }
     }

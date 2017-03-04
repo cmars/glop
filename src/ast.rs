@@ -18,7 +18,7 @@ pub struct Match {
 pub fn acting_roles(conditions: &Vec<Condition>) -> HashSet<String> {
     conditions.iter()
         .map(|c| {
-            if let &Condition::Message { topic: _, peer_role: _, ref acting_role } = c {
+            if let &Condition::Message { topic: _, src_role: _, ref acting_role } = c {
                 if let &Some(ref role) = acting_role {
                     return Some(role.to_string());
                 }
@@ -44,7 +44,7 @@ pub enum Condition {
     IsUnset(Identifier),
     Message {
         topic: String,
-        peer_role: Option<String>,
+        src_role: Option<String>,
         acting_role: Option<String>,
     },
 }
@@ -112,13 +112,13 @@ impl fmt::Display for Condition {
             &Condition::Cmp(ref l, ref op, ref r) => write!(f, "{} {} {}", FmtIdentifier(l), op, r),
             &Condition::IsSet(ref k) => write!(f, "is_set {}", FmtIdentifier(k)),
             &Condition::IsUnset(ref k) => write!(f, "is_unset {}", FmtIdentifier(k)),
-            &Condition::Message { ref topic, ref peer_role, ref acting_role } => {
+            &Condition::Message { ref topic, ref src_role, ref acting_role } => {
                 write!(f, "message {}", topic)?;
-                if let &Some(ref peer) = peer_role {
-                    write!(f, " from {}", peer)?;
+                if let &Some(ref role) = src_role {
+                    write!(f, " from {}", role)?;
                 }
-                if let &Some(ref acting) = acting_role {
-                    write!(f, " as {}", acting)?;
+                if let &Some(ref role) = acting_role {
+                    write!(f, " as {}", role)?;
                 }
                 Ok(())
             }

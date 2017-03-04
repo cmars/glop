@@ -66,6 +66,7 @@ fn main() {
                 .arg(Arg::with_name("TOPIC").index(1).required(true)))
             .subcommand(SubCommand::with_name("send")
                 .about("send a message to an agent")
+                .arg(Arg::with_name("ROLE").short("r").long("role").takes_value(true))
                 .arg(Arg::with_name("NAME").index(1).required(true))
                 .arg(Arg::with_name("TOPIC").index(2).required(true))
                 .arg(Arg::with_name("CONTENTS").index(3).multiple(true).required(false))))
@@ -175,8 +176,15 @@ fn cmd_run<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let glop_file = app_m.value_of("GLOPFILE").unwrap();
     let glop_contents = try!(read_file(glop_file));
     let glop = grammar::glop(&glop_contents).map_err(Error::Parse)?;
-    let mut st = runtime::State::new(runtime::MemStorage::new());
-    st.mut_storage().push_msg("init", value::Obj::new())?;
+    let mut st = runtime::State::new("main", runtime::MemStorage::new());
+    st.mut_storage()
+        .push_msg(value::Message {
+            src: "".to_string(),
+            src_role: None,
+            dst: "main".to_string(),
+            topic: "init".to_string(),
+            contents: value::Obj::new(),
+        })?;
     let m_excs =
         glop.matches.iter().map(|m_ast| runtime::Match::new_from_ast(&m_ast)).collect::<Vec<_>>();
     loop {
@@ -348,8 +356,13 @@ fn cmd_send_agent<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let addr_str = agent::read_agent_addr().map_err(Error::IO)?;
     let addr = addr_str.parse().map_err(Error::AddrParse)?;
     let contents = kv_map(app_m.values_of("CONTENTS"));
-    let req = agent::Request::SendTo(agent::Envelope {
+    let req = agent::Request::SendTo(value::Message {
         src: "user".to_string(),
+        src_role: if let Some(ref role) = app_m.value_of("ROLE") {
+            Some(role.to_string())
+        } else {
+            None
+        },
         dst: app_m.value_of("NAME").unwrap().to_string(),
         topic: app_m.value_of("TOPIC").unwrap().to_string(),
         contents: value::Value::from_flat_map(contents),

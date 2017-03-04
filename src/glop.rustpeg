@@ -66,17 +66,17 @@ value -> String
     / "\"" v:$([^"]+) "\"" { String::from(v) }
 
 unaryfunc -> Condition
-    = "message" __ topic:identifier __ peer:maybePeerRole __ acting:maybeActingRole {
+    = "message" __ topic:identifier __ src_role:maybeSrcRole __ acting_role:maybeActingRole {
 		Condition::Message{
 			topic: topic.join("."),
-			peer_role: peer,
-			acting_role: acting,
+			src_role: src_role,
+			acting_role: acting_role,
 		}
 	}
     / "is_set" __ k:identifier { Condition::IsSet(k) }
     / "is_unset" __ k:identifier { Condition::IsUnset(k) }
 
-maybePeerRole -> Option<String>
+maybeSrcRole -> Option<String>
 	= "from" __ role:idpart { Some(role) }
 	/ { None }
 

@@ -3,7 +3,7 @@
 use super::*;
 use super::super::grammar;
 use super::super::signal_fix;
-use self::value::{Obj, Value};
+use self::value::{Message, Obj, Value};
 
 const SIMPLE_SCRIPT_OK: &'static str = r###"
 when (message init) {
@@ -74,6 +74,16 @@ EOF
 }
 "###;
 
+fn test_msg(topic: &str, contents: Obj) -> Message {
+    Message {
+        src: "".to_string(),
+        src_role: None,
+        dst: "test".to_string(),
+        topic: topic.to_string(),
+        contents: contents,
+    }
+}
+
 fn parse_one_match(s: &str) -> ast::Match {
     let mut g = grammar::glop(s).unwrap();
     assert_eq!(g.matches.len(), 1);
@@ -85,8 +95,8 @@ fn simple_script() {
     let _lock = signal_fix::lock();
 
     let m_ast = parse_one_match(SIMPLE_SCRIPT_OK);
-    let mut st = State::new(MemStorage::new());
-    st.mut_storage().push_msg("init", Obj::new()).unwrap();
+    let mut st = State::new("test", MemStorage::new());
+    st.mut_storage().push_msg(test_msg("init", Obj::new())).unwrap();
     let m_exc = Match::new_from_ast(&m_ast);
     let mut txn = match st.eval(m_exc.clone()).unwrap() {
         Some(mut txn) => {
@@ -107,8 +117,8 @@ fn simple_script_err() {
     let _lock = signal_fix::lock();
 
     let m_ast = parse_one_match(SIMPLE_SCRIPT_ERR);
-    let mut st = State::new(MemStorage::new());
-    st.mut_storage().push_msg("init", Obj::new()).unwrap();
+    let mut st = State::new("test", MemStorage::new());
+    st.mut_storage().push_msg(test_msg("init", Obj::new())).unwrap();
     let m_exc = Match::new_from_ast(&m_ast);
     let mut txn = match st.eval(m_exc.clone()).unwrap() {
         Some(mut txn) => {
@@ -142,13 +152,13 @@ fn env_check_script_ok() {
     let _lock = signal_fix::lock();
 
     let m_ast = parse_one_match(ENV_CHECK_SCRIPT);
-    let mut st = State::new(MemStorage::new());
+    let mut st = State::new("test", MemStorage::new());
     st.mut_storage()
-        .push_msg("test",
-                  [("content".to_string(), Value::from_str("hello world"))]
-                      .iter()
-                      .cloned()
-                      .collect())
+        .push_msg(test_msg("test",
+                           [("content".to_string(), Value::from_str("hello world"))]
+                               .iter()
+                               .cloned()
+                               .collect()))
         .unwrap();
     let m_exc = Match::new_from_ast(&m_ast);
     let mut txn = match st.eval(m_exc.clone()).unwrap() {
@@ -170,8 +180,8 @@ fn hello_script_server() {
     let _lock = signal_fix::lock();
 
     let m_ast = parse_one_match(HELLO_SCRIPT_SERVER);
-    let mut st = State::new(MemStorage::new());
-    st.mut_storage().push_msg("init", Obj::new()).unwrap();
+    let mut st = State::new("test", MemStorage::new());
+    st.mut_storage().push_msg(test_msg("init", Obj::new())).unwrap();
     let m_exc = Match::new_from_ast(&m_ast);
     let mut txn = match st.eval(m_exc.clone()).unwrap() {
         Some(mut txn) => {
@@ -194,13 +204,13 @@ fn script_server_access_msg() {
     let _lock = signal_fix::lock();
 
     let m_ast = parse_one_match(SCRIPT_SERVER_ACCESS_MSG);
-    let mut st = State::new(MemStorage::new());
+    let mut st = State::new("test", MemStorage::new());
     st.mut_storage()
-        .push_msg("init",
-                  [("foo".to_string(), Value::Str("bar".to_string()))]
-                      .iter()
-                      .cloned()
-                      .collect())
+        .push_msg(test_msg("init",
+                           [("foo".to_string(), Value::Str("bar".to_string()))]
+                               .iter()
+                               .cloned()
+                               .collect()))
         .unwrap();
     let m_exc = Match::new_from_ast(&m_ast);
     let mut txn = match st.eval(m_exc.clone()).unwrap() {

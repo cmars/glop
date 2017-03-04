@@ -6,16 +6,22 @@ use value::{Identifier, Obj, Value};
 #[derive(Clone, Debug)]
 pub struct Match {
     pub conditions: Vec<Condition>,
-    pub msg_topics: HashSet<String>,
+    pub msg_filters: HashSet<MessageFilter>,
     pub actions: Vec<Action>,
     pub acting_role: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct MessageFilter {
+    pub topic: String,
+    pub src_role: Option<String>,
 }
 
 impl Match {
     fn new() -> Match {
         Match {
             conditions: vec![],
-            msg_topics: HashSet::new(),
+            msg_filters: HashSet::new(),
             actions: vec![],
             acting_role: None,
         }
@@ -26,9 +32,12 @@ impl Match {
         m_exc.conditions = m_ast.conditions
             .iter()
             .map(|c_ast| {
-                if let &ast::Condition::Message { ref topic, peer_role: _, acting_role: _ } =
+                if let &ast::Condition::Message { ref topic, ref src_role, acting_role: _ } =
                     c_ast {
-                    m_exc.msg_topics.insert(topic.to_string());
+                    m_exc.msg_filters.insert(MessageFilter {
+                        topic: topic.to_string(),
+                        src_role: src_role.clone(),
+                    });
                 }
                 Condition::new(c_ast)
             })
@@ -46,7 +55,7 @@ pub enum Condition {
     IsUnset(Identifier),
     Message {
         topic: String,
-        peer_role: Option<String>,
+        src_role: Option<String>,
         acting_role: Option<String>,
     },
 }
@@ -59,10 +68,10 @@ impl Condition {
             }
             &ast::Condition::IsSet(ref k) => Condition::IsSet(Identifier::from_ast(k)),
             &ast::Condition::IsUnset(ref k) => Condition::IsUnset(Identifier::from_ast(k)),
-            &ast::Condition::Message { ref topic, ref peer_role, ref acting_role } => {
+            &ast::Condition::Message { ref topic, ref src_role, ref acting_role } => {
                 Condition::Message {
                     topic: topic.to_string(),
-                    peer_role: peer_role.clone(),
+                    src_role: src_role.clone(),
                     acting_role: acting_role.clone(),
                 }
             }

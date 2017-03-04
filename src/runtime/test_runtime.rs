@@ -7,7 +7,7 @@ use std;
 
 use super::*;
 use super::super::grammar;
-use self::value::{Obj, Value};
+use self::value::{Message, Obj, Value};
 
 const SIMPLE_INIT: &'static str = r#"when (message init) { msg pop init; }"#;
 const TWO_MSGS: &'static str = r#"when (message foo, message bar) { msg pop foo; msg pop bar; }"#;
@@ -17,6 +17,16 @@ const TWO_MSGS_IS_SET: &'static str =
 const SIMPLE_EQUAL: &'static str = r#"when (foo == bar) { var unset foo; }"#;
 const SIMPLE_NOT_EQUAL: &'static str = r#"when (foo != bar) { var set foo bar; }"#;
 const SIMPLE_IS_SET: &'static str = r#"when (is_set foo) { var unset foo; }"#;
+
+fn test_msg(topic: &str, contents: Obj) -> Message {
+    Message {
+        src: "".to_string(),
+        src_role: None,
+        dst: "test".to_string(),
+        topic: topic.to_string(),
+        contents: contents,
+    }
+}
 
 fn setup() {
     let _ = env_logger::init();
@@ -29,7 +39,7 @@ fn parse_one_match(s: &str) -> ast::Match {
 }
 
 fn mem_state() -> (State<MemStorage>, cleanup::Cleanup) {
-    (State::new(MemStorage::new()), cleanup::Cleanup::Empty)
+    (State::new("test", MemStorage::new()), cleanup::Cleanup::Empty)
 }
 
 fn durable_state() -> (State<DurableStorage>, cleanup::Cleanup) {
@@ -38,7 +48,7 @@ fn durable_state() -> (State<DurableStorage>, cleanup::Cleanup) {
     let storage_path = storage_path_buf.to_str().unwrap();
     let cl = cleanup::Cleanup::Dir(storage_path.to_string());
     let storage = DurableStorage::new(storage_path).unwrap();
-    (State::new(storage), cl)
+    (State::new("test", storage), cl)
 }
 
 fn rand_string() -> String {
@@ -84,7 +94,9 @@ fn matched_init_message<T: Storage>(f: StateFactory<T>) {
     let (st, _cleanup) = f();
     let mut st = st;
     let m_ast = parse_one_match(SIMPLE_INIT);
-    st.mut_storage().push_msg("init", Obj::new()).unwrap();
+    st.mut_storage()
+        .push_msg(test_msg("init", Obj::new()))
+        .unwrap();
     let m_exc = Match::new_from_ast(&m_ast);
     let mut txn = match st.eval(m_exc.clone()).unwrap() {
         Some(mut txn) => {
@@ -120,7 +132,9 @@ fn rollback_msg<T: Storage>(f: StateFactory<T>) {
     let (st, _cleanup) = f();
     let mut st = st;
     let m_ast = parse_one_match(SIMPLE_INIT);
-    st.mut_storage().push_msg("init", Obj::new()).unwrap();
+    st.mut_storage()
+        .push_msg(test_msg("init", Obj::new()))
+        .unwrap();
     let m_exc = Match::new_from_ast(&m_ast);
     let txn = match st.eval(m_exc.clone()).unwrap() {
         Some(mut txn) => {
@@ -171,13 +185,15 @@ fn matched_only_init_message<T: Storage>(f: StateFactory<T>) {
     let (st, _cleanup) = f();
     let mut st = st;
     let m_ast = parse_one_match(SIMPLE_INIT);
-    st.mut_storage().push_msg("init", Obj::new()).unwrap();
     st.mut_storage()
-        .push_msg("blah",
-                  [("foo".to_string(), Value::Str("bar".to_string()))]
-                      .iter()
-                      .cloned()
-                      .collect())
+        .push_msg(test_msg("init", Obj::new()))
+        .unwrap();
+    st.mut_storage()
+        .push_msg(test_msg("blah",
+                           [("foo".to_string(), Value::Str("bar".to_string()))]
+                               .iter()
+                               .cloned()
+                               .collect()))
         .unwrap();
     let m_exc = Match::new_from_ast(&m_ast);
     let mut txn = match st.eval(m_exc.clone()).unwrap() {
@@ -214,10 +230,10 @@ fn matched_two_messages<T: Storage>(f: StateFactory<T>) {
     let (st, _cleanup) = f();
     let mut st = st;
     let m_ast = parse_one_match(TWO_MSGS);
-    st.mut_storage().push_msg("foo", Obj::new()).unwrap();
-    st.mut_storage().push_msg("bar", Obj::new()).unwrap();
-    st.mut_storage().push_msg("foo", Obj::new()).unwrap();
-    st.mut_storage().push_msg("bar", Obj::new()).unwrap();
+    st.mut_storage().push_msg(test_msg("foo", Obj::new())).unwrap();
+    st.mut_storage().push_msg(test_msg("bar", Obj::new())).unwrap();
+    st.mut_storage().push_msg(test_msg("foo", Obj::new())).unwrap();
+    st.mut_storage().push_msg(test_msg("bar", Obj::new())).unwrap();
     let m_exc = Match::new_from_ast(&m_ast);
 
     for i in 0..2 {
@@ -497,8 +513,8 @@ fn preserve_unmatched_message<T: Storage>(f: StateFactory<T>) {
     // save(0,
     // ("foo".to_string(), Value::from_str("blah"))].iter().cloned().collect())
     // unwrap();
-    st.mut_storage().push_msg("foo", Obj::new()).unwrap();
-    st.mut_storage().push_msg("bar", Obj::new()).unwrap();
+    st.mut_storage().push_msg(test_msg("foo", Obj::new())).unwrap();
+    st.mut_storage().push_msg(test_msg("bar", Obj::new())).unwrap();
     // Doesn't match because baz is not set
     match st.eval(m_exc_tmis.clone()).unwrap() {
         Some(_) => panic!("unexpected match"),
