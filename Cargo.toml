@@ -1,6 +1,6 @@
 [package]
 name = "glop"
-version = "0.1.7"
+version = "0.1.8"
 description = "Glue Language for OPerations"
 license = "Apache-2.0"
 authors = ["Casey Marshall <glop@cmars.tech>"]
