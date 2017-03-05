@@ -80,8 +80,13 @@ fn main() {
                 .about("remove an agent")
                 .arg(Arg::with_name("NAME").index(1).required(true)))
             .subcommand(SubCommand::with_name("list").about("list agents"))
+            .subcommand(SubCommand::with_name("introduce")
+                .about("introduce agents")
+                .arg(Arg::with_name("NAME:ROLE").index(1).multiple(true).required(true)))
             .subcommand(SubCommand::with_name("send")
                 .about("send a message to an agent")
+                .arg(Arg::with_name("SOURCE").short("s").long("src").takes_value(true))
+                .arg(Arg::with_name("ROLE").short("r").long("role").takes_value(true))
                 .arg(Arg::with_name("NAME").index(1).required(true))
                 .arg(Arg::with_name("TOPIC").index(2).required(true))
                 .arg(Arg::with_name("CONTENTS").index(3).multiple(true).required(false))));
@@ -127,6 +132,9 @@ fn main() {
                     Some("remove") => cmd_remove(sub_m.subcommand_matches("remove").unwrap()),
                     Some("list") => cmd_list(sub_m.subcommand_matches("list").unwrap()),
                     Some("send") => cmd_send_agent(sub_m.subcommand_matches("send").unwrap()),
+                    Some("introduce") => {
+                        cmd_introduce(sub_m.subcommand_matches("introduce").unwrap())
+                    }
                     Some(subcmd) => {
                         error!("unsupported command {}", subcmd);
                         Err(Error::CLI(clap::Error::with_description("unsupported command",
@@ -357,7 +365,11 @@ fn cmd_send_agent<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let addr = addr_str.parse().map_err(Error::AddrParse)?;
     let contents = kv_map(app_m.values_of("CONTENTS"));
     let req = agent::Request::SendTo(value::Message {
-        src: "user".to_string(),
+        src: if let Some(ref src) = app_m.value_of("SOURCE") {
+            src.to_string()
+        } else {
+            "user".to_string()
+        },
         src_role: if let Some(ref role) = app_m.value_of("ROLE") {
             Some(role.to_string())
         } else {
@@ -371,7 +383,31 @@ fn cmd_send_agent<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
         .map_err(Error::IO)?;
     match resp {
-        agent::Response::SendTo => Ok(()),
+        agent::Response::SendTo { src: _, dst: _ } => Ok(()),
+        agent::Response::Error(msg) => Err(Error::ErrorResponse(msg)),
+        _ => Err(Error::BadResponse),
+    }
+}
+
+fn cmd_introduce<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
+    let mut core = Core::new()?;
+    let handle = core.handle();
+    let addr_str = agent::read_agent_addr().map_err(Error::IO)?;
+    let addr = addr_str.parse().map_err(Error::AddrParse)?;
+    let name_roles = name_roles(app_m.values_of("NAME:ROLE"));
+    let req = agent::Request::Introduce(name_roles);
+    let builder = TcpClient::new(agent::ClientProto);
+    let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
+        .map_err(Error::IO)?;
+    match resp {
+        agent::Response::Introduce(ref results) => {
+            for result in results {
+                if let &agent::Response::Error(ref msg) = result {
+                    return Err(Error::ErrorResponse(msg.to_string()));
+                }
+            }
+            Ok(())
+        }
         agent::Response::Error(msg) => Err(Error::ErrorResponse(msg)),
         _ => Err(Error::BadResponse),
     }
@@ -398,15 +434,26 @@ fn cmd_send_script<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
 }
 
 fn kv_map<'a>(maybe_args: Option<clap::Values<'a>>) -> HashMap<String, String> {
-    match maybe_args {
-        Some(values) => {
-            let mut result = HashMap::new();
-            for kvpair in values {
-                let kvs = kvpair.split("=").collect::<Vec<_>>();
-                result.insert(kvs[0].to_string(), kvs[1].to_string());
-            }
-            result
+    let mut result = HashMap::new();
+    if let Some(values) = maybe_args {
+        for kvpair in values {
+            let kvs = kvpair.split("=").collect::<Vec<_>>();
+            result.insert(kvs[0].to_string(), kvs[1].to_string());
         }
-        None => HashMap::new(),
     }
+    result
+}
+
+fn name_roles<'a>(maybe_args: Option<clap::Values<'a>>) -> Vec<agent::AgentRole> {
+    let mut result = vec![];
+    if let Some(values) = maybe_args {
+        for nrpair in values {
+            let nrs = nrpair.split(":").collect::<Vec<_>>();
+            result.push(agent::AgentRole {
+                name: nrs[0].to_string(),
+                role: nrs[1].to_string(),
+            });
+        }
+    }
+    result
 }

@@ -108,6 +108,7 @@ impl<S: Storage> State<S> {
                         topic: topic.to_string(),
                         contents: contents.clone(),
                     };
+                    info!("send {:?}", msg);
                     if dst == "self" {
                         self_msgs.push(msg);
                     } else {

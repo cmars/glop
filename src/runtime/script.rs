@@ -291,19 +291,19 @@ pub fn run_script(ctx: Arc<Mutex<Context>>, script_path: &str) -> Result<Vec<Act
         .then(|result| {
             match result {
                 Ok(output) => {
+                    let mut stdout = String::from_utf8(output.stdout).unwrap();
+                    stdout.pop();
+                    info!("stdout: {}", stdout);
+                    let mut stderr = String::from_utf8(output.stderr).unwrap();
+                    stderr.pop();
+                    info!("stderr: {}", stderr);
                     if output.status.success() {
-                        let mut stdout = String::from_utf8(output.stdout).unwrap();
-                        stdout.pop();
-                        info!("stdout: {}", stdout);
                         Ok(())
                     } else {
                         let code = match output.status.code() {
                             Some(value) => value,
                             None => 0,
                         };
-                        let mut stderr = String::from_utf8(output.stderr).unwrap();
-                        stderr.pop();
-                        info!("stderr: {}", stderr);
                         Err(Error::Exec(code, stderr))
                     }
                 }

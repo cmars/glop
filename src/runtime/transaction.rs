@@ -52,7 +52,24 @@ impl Transaction {
             };
             applied.append(&mut resulting_actions);
         }
+        for i in 0..applied.len() {
+            if let Action::SendMsg { ref mut dst, topic: _, contents: _ } = applied[i] {
+                *dst = self.resolve_role(dst)?;
+            }
+        }
         Ok(applied)
+    }
+
+    fn resolve_role(&self, role: &str) -> Result<String> {
+        for mf in &self.m.msg_filters {
+            if let Some(ref src_role) = mf.src_role {
+                if role == src_role {
+                    let ctx = self.ctx.lock().unwrap();
+                    return ctx.resolve_topic(&mf.topic);
+                }
+            }
+        }
+        Err(error::Error::UndeliverableMessage(format!("sender role {} not found", role)))
     }
 
     pub fn eval(&self) -> bool {

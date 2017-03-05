@@ -2,6 +2,7 @@ use std;
 use std::collections::{HashMap, HashSet};
 use std::process::Command;
 
+use super::*;
 use super::value::{Identifier, Message, Value};
 
 pub struct Context {
@@ -57,5 +58,13 @@ impl Context {
 
     pub fn pop_msg(&mut self, topic: &str) {
         self.popped_topics.insert(topic.to_string());
+    }
+
+    pub fn resolve_topic(&self, topic: &str) -> Result<String> {
+        if let Some(msg) = self.msgs.get(topic) {
+            Ok(msg.src.to_string())
+        } else {
+            Err(error::Error::UndeliverableMessage(format!("sender of topic {} not found", topic)))
+        }
     }
 }

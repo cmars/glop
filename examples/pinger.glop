@@ -2,8 +2,15 @@ when (message init) #!/bin/bash
 glop msg pop init
 !#
 
-when (message ping from pinger as ponger) #!/bin/bash
-echo "ping"
-glop msg send ping:pinger pong
-glop msg pop ping
+when (message intro from ponger as pinger) #!/bin/bash
+set -ex
+glop msg send ponger ping
+glop msg pop intro
+!#
+
+when (message pong from ponger as pinger) #!/bin/bash
+set -e
+echo "pong"
+glop msg send ponger ping
+glop msg pop pong
 !#

@@ -74,7 +74,7 @@ impl std::fmt::Display for Error {
             Error::Exec(code, ref stderr) => write!(f, "script exit code {}: {}", code, stderr),
             Error::UnsupportedAction => write!(f, "unsupported action"),
             Error::AgentExists(ref name) => write!(f, "agent {} already added", name),
-            Error::UndeliverableMessage(ref dst) => write!(f, "undeliverable message to {}", dst),
+            Error::UndeliverableMessage(ref dst) => write!(f, "undeliverable message: {}", dst),
         }
     }
 }

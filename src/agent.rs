@@ -1,6 +1,7 @@
 extern crate fs2;
 extern crate futures;
 extern crate futures_cpupool;
+extern crate itertools;
 extern crate serde_json;
 extern crate tokio_core;
 extern crate tokio_proto;
@@ -16,6 +17,7 @@ use std::sync::{Arc, Mutex};
 use self::fs2::FileExt;
 use self::futures::{Future, Stream, Sink};
 use self::futures::sync::mpsc;
+use self::itertools::Itertools;
 use self::tokio_core::io::{Framed, Io};
 use self::tokio_service::Service as TokioService;
 
@@ -32,8 +34,15 @@ pub enum Request {
     Add { source: String, name: String },
     Remove { name: String },
     List,
-    SendTo(Message), /* RecvFrom { handle: String },
-                      * Introduce { names: Vec<String> }, */
+    SendTo(Message),
+    Introduce(Vec<AgentRole>),
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentRole {
+    pub name: String,
+    pub role: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -42,8 +51,8 @@ pub enum Response {
     Add,
     Remove,
     List { names: Vec<String> },
-    SendTo, /* RecvFrom { topic: String, contents: Obj },
-             * Introduce, */
+    SendTo { src: String, dst: String },
+    Introduce(Vec<Response>),
     Error(String),
 }
 
@@ -195,7 +204,8 @@ impl<S: runtime::Storage> Agent<S> {
         let result = self.st.commit(&mut txn);
         match result {
             Ok(_) => {}
-            Err(_) => {
+            Err(e) => {
+                error!("transaction seq={} failed: {}", txn.seq, e);
                 match self.st.rollback(txn) {
                     Ok(_) => {}
                     Err(e) => return Err(e),
@@ -348,19 +358,46 @@ impl<S: Storage + Send> Service<S> {
                 Response::Remove
             }
             Request::List => Response::List { names: state.outboxes.keys().cloned().collect() },
-            Request::SendTo(msg) => {
-                let sender = match state.outboxes.get(&msg.dst) {
-                    Some(s) => s.clone(),
-                    None => return Ok(Response::Error(format!("agent {} not found", &msg.dst))),
-                };
-                self.handle.spawn(sender.send(msg).then(|_| Ok(())));
-                Response::SendTo
+            Request::SendTo(msg) => self.send_to(&state, msg),
+            Request::Introduce(agent_roles) => {
+                let mut result = vec![];
+                for ref p in agent_roles.iter().combinations(2) {
+                    result.push(self.send_to(&state,
+                                             Message {
+                                                 src: p[0].name.to_string(),
+                                                 src_role: Some(p[0].role.to_string()),
+                                                 dst: p[1].name.to_string(),
+                                                 topic: "intro".to_string(),
+                                                 contents: Obj::new(),
+                                             }));
+                    result.push(self.send_to(&state,
+                                             Message {
+                                                 src: p[1].name.to_string(),
+                                                 src_role: Some(p[1].role.to_string()),
+                                                 dst: p[0].name.to_string(),
+                                                 topic: "intro".to_string(),
+                                                 contents: Obj::new(),
+                                             }));
+                }
+                Response::Introduce(result)
             }
-            // RecvFrom { handle: String },
-            // Introduce { names: Vec<String> },
         };
         debug!("response {:?}", res);
         Ok(res)
+    }
+
+    fn send_to(&self, state: &ServiceState<S>, msg: Message) -> Response {
+        if let Some(sender) = state.outboxes.get(&msg.dst) {
+            let resp = Response::SendTo {
+                src: msg.src.to_string(),
+                dst: msg.dst.to_string(),
+            };
+            let sender = sender.clone();
+            self.handle.spawn(sender.send(msg).then(|_| Ok(())));
+            resp
+        } else {
+            Response::Error(format!("agent {} not found", &msg.dst))
+        }
     }
 }
 
