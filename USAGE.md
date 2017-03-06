@@ -1,7 +1,7 @@
 # Usage
 
 _Some musings about glop in practice. None of this is implemented yet and it
-might change drastically._
+might change drastically until glop is released as '1.0'._
 
 ## Starting the agent server
 
@@ -27,7 +27,7 @@ Agents on the server may be listed with `glop agent list`.
 
 Agents may be removed.
 
-    glop agent remove 
+    glop agent remove
 
 # Interact with agents via messages
 
@@ -84,13 +84,39 @@ The response might be:
 It's tedious to have to tell agents every single thing they need to do.
 Instead, get them talking to each other!
 
-    glop agent introduce foo bar
+    glop agent introduce foo:fooer bar:barrister
 
 Agents declare the roles in which they act, and the counterpart agent roles
 they react with. The agents then coordinate amongst themselves what they do
-from there.
+from there. The colon syntax is of the form `agent-name:role`, used to designed
+each agent and the role it should act in, in the conversation.
 
+# Keeping track of contacts
 
+Once introduced, agents may need to keep track of their counterpart contacts.
+From within a `match` on a topic from a role,
+
+    match (message intro from foolike as barrister) #!/bin/bash
+    set -e
+    glop contact add foo-fighters intro
+    !#
+
+Where `foo` was the topic of a matched message, and `foo-fighters` is a contact list.
+
+Contact lists can be the object of a `msg send`,
+
+    glop msg send foo-fighters attack=true method=squirrels count=20
+
+The members of contact list may be shown,
+
+    glop contact list foo-fighters
+
+A contact may also be removed by resolving the role of the current topic match,
+
+    match (message bye from foolike as barrister) #!/bin/bash
+    set -e
+    glop contact remove foo-fighters bye
+    !#
 
 ## Coordinate across machines
 
@@ -100,6 +126,8 @@ Agents running on different machines can be introduced over SSH.
 
 # TODO
 
-- Common message pattern language
+- Common message pattern language. Types?
 - Cleaner distinction between agent "instance" and "template"
-- Agent lifecycle issues
+- Agent lifecycle issues. How do they die?
+- Agent internetworking across various protocols systems (SMTP, MQTT, HTTP)
+- PKI drudgery
