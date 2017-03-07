@@ -1,5 +1,5 @@
 use std;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::process::Command;
 
 use super::*;
@@ -8,7 +8,6 @@ use super::value::{Identifier, Message, Value};
 pub struct Context {
     pub vars: HashMap<String, Value>,
     pub msgs: HashMap<String, Message>,
-    pub popped_topics: HashSet<String>,
 }
 
 impl Context {
@@ -16,7 +15,6 @@ impl Context {
         Context {
             vars: vars,
             msgs: msgs,
-            popped_topics: HashSet::new(),
         }
     }
 
@@ -54,10 +52,6 @@ impl Context {
 
     pub fn unset_var(&mut self, key: &Identifier) {
         key.unset(&mut self.vars)
-    }
-
-    pub fn pop_msg(&mut self, topic: &str) {
-        self.popped_topics.insert(topic.to_string());
     }
 
     pub fn resolve_topic(&self, topic: &str) -> Result<String> {

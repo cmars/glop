@@ -4,7 +4,6 @@
 
 when (message init) {
   var set ping true;
-  msg pop init;
 }
 
 when (ping == true) #!/bin/bash

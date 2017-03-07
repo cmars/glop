@@ -18,7 +18,6 @@ tar xzf seafile-server.tar.gz
 glop var set seafile.port 8082
 
 glop var set installed true
-glop msg pop init
 !#
 
 // Start seafile if installed and not running.
@@ -27,7 +26,6 @@ when (message start, is_set installed, is_unset running) #!/bin/bash
 set -e
 ~/seafile-server-latest/seafile.sh start
 glop var set running true
-glop msg pop start
 !#
 
 // Not starting seafile if already running (needs simplification).
@@ -35,7 +33,6 @@ glop msg pop start
 when (message start, is_set running) #!/bin/bash
 set -e
 echo "already started"
-glop msg pop start
 !#
 
 // Stop seafile if installed and running.
@@ -44,7 +41,6 @@ when (message stop, is_set installed, is_set running) #!/bin/bash
 set -e
 ~/seafile-server-latest/seafile.sh stop
 glop var unset running
-glop msg pop stop
 !#
 
 // Not stopping seafile if not running (needs simplification).
@@ -52,7 +48,6 @@ glop msg pop stop
 when (message stop, is_unset running) #!/bin/bash
 set -e
 echo "already stopped"
-glop msg pop stop
 !#
 
 /*********************************************************************
@@ -106,7 +101,6 @@ peer=$(glop msg get intro.peer.name)
 myip= # magic!
 glop var set frontend ${peer}
 glop msg send ${peer} backend addr=${myip} port=${glop var get seafile.port}
-glop msg pop intro
 !#
 
 // Configuring seafile.
@@ -129,7 +123,6 @@ glop msg send self configured
 
 when (message configured, is_unset frontend) #!/bin/bash
 set -e
-glop msg pop configured
 !#
 
 // Update frontend when relevant information has changed
@@ -139,7 +132,6 @@ set -e
 peer=$(glop msg get intro.peer.name)
 myip= # magic!
 glop msg send ${peer} backend addr=${myip} port=${glop var get seafile.port}
-glop msg pop configured
 !#
 
 *********************************************************************/

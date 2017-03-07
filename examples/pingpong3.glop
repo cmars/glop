@@ -12,7 +12,6 @@ when (message init) #!/bin/bash
 echo "pingmsg agent online"
 glop msg send self ping text="from init"
 glop msg send self pong text="from init"
-glop msg pop init
 !#
 
 when (message ping) #!/bin/bash
@@ -22,7 +21,6 @@ if [ -n "${text}" ]; then
 fi
 glop msg send self pong text="from ping"
 echo ping
-glop msg pop ping
 !#
 
 when (message pong) #!/bin/bash
@@ -32,5 +30,4 @@ if [ -n "${text}" ]; then
 fi
 glop msg send self ping text="from pong"
 echo pong
-glop msg pop pong
 !#

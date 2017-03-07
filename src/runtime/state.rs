@@ -85,8 +85,8 @@ impl<S: Storage> State<S> {
         debug!("State.commit: BEGIN transaction seq={}", txn.seq);
         let mut txn = txn;
         let mut vars = self.storage.vars().clone();
-        let mut popped = HashSet::new();
         let mut self_msgs = Vec::new();
+        let matched_topics = txn.m.topics();
         let actions = txn.apply()?;
         for action in actions {
             debug!(target: "State.commit", "action {:?}", action);
@@ -96,9 +96,6 @@ impl<S: Storage> State<S> {
                 }
                 &Action::UnsetVar(ref k) => {
                     k.unset(&mut vars);
-                }
-                &Action::PopMsg(ref topic) => {
-                    popped.insert(topic.to_string());
                 }
                 &Action::SendMsg { ref dst, ref topic, ref contents } => {
                     let msg = Message {
@@ -121,7 +118,7 @@ impl<S: Storage> State<S> {
         }
         let msgs = txn.with_context(|ctx| ctx.msgs.clone());
         for (topic, msg) in msgs {
-            if !popped.contains(&topic) {
+            if !matched_topics.contains(&topic) {
                 self.storage.push_msg(msg)?;
             }
         }

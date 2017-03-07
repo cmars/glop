@@ -29,7 +29,6 @@ pub enum Request {
     SetVar { key: String, value: String },
     UnsetVar { key: String },
     GetMsg { topic: String, key: String },
-    PopMsg { topic: String },
     SendMsg {
         dst: String,
         topic: String,
@@ -48,7 +47,6 @@ pub enum Response {
         key: String,
         value: String,
     },
-    PopMsg { topic: String },
     SendMsg { dst: String, topic: String },
 }
 
@@ -242,14 +240,6 @@ impl Service for ScriptService {
                         }
                     }
                 }
-            }
-            Request::PopMsg { ref topic } => {
-                ctx.pop_msg(topic);
-                drop(ctx);
-                let mut actions = self.actions.lock().unwrap();
-                actions.push(Action::PopMsg(topic.to_string()));
-                drop(actions);
-                Response::PopMsg { topic: topic.to_string() }
             }
             Request::SendMsg { ref dst, ref topic, ref contents } => {
                 drop(ctx);

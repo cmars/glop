@@ -61,7 +61,6 @@ pub enum CmpOpcode {
 pub enum Action {
     SetVar(Identifier, String),
     UnsetVar(Identifier),
-    PopMsg(String),
     Script(String),
 }
 
@@ -72,7 +71,6 @@ impl fmt::Display for Action {
         match self {
             &Action::SetVar(ref k, ref v) => write!(f, "var set {} {};", FmtIdentifier(k), v),
             &Action::UnsetVar(ref k) => write!(f, "var unset {};", FmtIdentifier(k)),
-            &Action::PopMsg(ref topic) => write!(f, "msg pop {};", topic),
             &Action::Script(ref v) => write!(f, r#"script {}!#"#, v),
         }
     }

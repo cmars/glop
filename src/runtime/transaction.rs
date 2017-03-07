@@ -42,11 +42,6 @@ impl Transaction {
                     ctx.unset_var(k);
                     vec![action.clone()]
                 }
-                Action::PopMsg(ref topic) => {
-                    let mut ctx = self.ctx.lock().unwrap();
-                    ctx.pop_msg(topic);
-                    vec![action.clone()]
-                }
                 Action::Script(ref contents) => self.exec_script(contents)?,
                 Action::SendMsg { dst: _, topic: _, contents: _ } => vec![action.clone()],
             };

@@ -7,7 +7,6 @@ fn round_trip_simple() {
     let src = r#"when (message init) {
     var set installed false;
     var set initialized true;
-    msg pop init;
 }
 
 when (installed == false, initialized == true) {
@@ -19,7 +18,6 @@ echo "hello world"
 }
 
 when (message config, is_set initialized) {
-    msg pop config;
 }
 
 when (message foo, initialized != baz) {

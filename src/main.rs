@@ -61,9 +61,6 @@ fn main() {
                 .about("get value of message")
                 .arg(Arg::with_name("TOPIC").index(1).required(true))
                 .arg(Arg::with_name("KEY").index(2).required(true)))
-            .subcommand(SubCommand::with_name("pop")
-                .about("pop message in current context")
-                .arg(Arg::with_name("TOPIC").index(1).required(true)))
             .subcommand(SubCommand::with_name("send")
                 .about("send a message to an agent")
                 .arg(Arg::with_name("ROLE").short("r").long("role").takes_value(true))
@@ -114,7 +111,6 @@ fn main() {
                 let sub_m = app_m.subcommand_matches("msg").unwrap();
                 match sub_m.subcommand_name() {
                     Some("get") => cmd_getmsg(sub_m.subcommand_matches("get").unwrap()),
-                    Some("pop") => cmd_popmsg(sub_m.subcommand_matches("pop").unwrap()),
                     Some("send") => cmd_send_script(sub_m.subcommand_matches("send").unwrap()),
                     Some(subcmd) => {
                         error!("unsupported command {}", subcmd);
@@ -282,22 +278,6 @@ fn cmd_getmsg<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
             println!("{}", value);
             Ok(())
         }
-        _ => Err(Error::BadResponse),
-    }
-}
-
-fn cmd_popmsg<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
-    let mut core = Core::new()?;
-    let handle = core.handle();
-    let addr_str = std::env::var("ADDR").map_err(Error::Env)?;
-    let addr = addr_str.parse().map_err(Error::AddrParse)?;
-    let req =
-        runtime::ScriptRequest::PopMsg { topic: app_m.value_of("TOPIC").unwrap().to_string() };
-    let builder = TcpClient::new(runtime::ScriptClientProto);
-    let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
-        .map_err(Error::IO)?;
-    match resp {
-        runtime::ScriptResponse::PopMsg { topic: _ } => Ok(()),
         _ => Err(Error::BadResponse),
     }
 }

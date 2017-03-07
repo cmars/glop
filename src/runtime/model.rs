@@ -46,6 +46,19 @@ impl Match {
         m_exc.acting_role = m_ast.acting_role.clone();
         m_exc
     }
+
+    pub fn topics(&self) -> HashSet<String> {
+        self.conditions
+            .iter()
+            .filter_map(|c| {
+                if let &Condition::Message { ref topic, src_role: _, acting_role: _ } = c {
+                    Some(topic.to_string())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -112,7 +125,6 @@ impl CmpOpcode {
 pub enum Action {
     SetVar(Identifier, String),
     UnsetVar(Identifier),
-    PopMsg(String),
     Script(String),
     SendMsg {
         dst: String,
@@ -128,7 +140,6 @@ impl Action {
                 Action::SetVar(Identifier::from_ast(k), v.to_string())
             }
             &ast::Action::UnsetVar(ref k) => Action::UnsetVar(Identifier::from_ast(k)),
-            &ast::Action::PopMsg(ref topic) => Action::PopMsg(topic.to_string()),
             &ast::Action::Script(ref contents) => Action::Script(contents.to_string()),
         }
     }
