@@ -9,7 +9,7 @@ matches -> Vec<Match>
     / m:match { vec![m] }
 
 match -> Match
-    = "when" __ "(" __ c:conditions __ ")" __ "{" __ a:actions __ "}" {?
+    = "when" __ "(" __ c:conditions __ ")" __ a:matchActions {?
 		let acting_roles_set = acting_roles(&c);
 		let acting_roles = acting_roles_set.iter().collect::<Vec<&String>>();
 		if acting_roles.len() > 1 {
@@ -27,24 +27,10 @@ match -> Match
 			})
 		}
     }
-    / "when" __ "(" __ c:conditions __ ")" __ v:$("#!" (!"!#" .)+) "!#" {?
-		let acting_roles_set = acting_roles(&c);
-		let acting_roles = acting_roles_set.iter().collect::<Vec<&String>>();
-		if acting_roles.len() > 1 {
-			Err("multiple acting roles in the same match is not supported")
-		} else {
-			let acting_role = if acting_roles.is_empty() {
-				None
-			} else {
-				Some(acting_roles[0].to_string())
-			};
-			Ok(Match{
-				conditions: c,
-				actions: vec![Action::Script(String::from(v))],
-				acting_role: acting_role,
-			})
-		}
-    }
+
+matchActions -> Vec<Action>
+	= "{" __ a:actions __ "}" { a }
+	/ v:$("#!" (!"!#" .)+) "!#" { vec![Action::Script(String::from(v))] }
 
 conditions -> Vec<Condition>
     = c:condition __ "," __ cs:conditions { let mut cs = cs; cs.insert(0, c); cs }
