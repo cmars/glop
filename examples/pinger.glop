@@ -1,10 +1,10 @@
 when (message intro from ponger as pinger) #!/bin/bash
 set -e
-glop msg send ponger ping
+glop msg reply intro ping
 !#
 
 when (message pong from ponger as pinger) #!/bin/bash
 set -e
 echo "pong"
-glop msg send ponger ping
+glop msg reply pong ping
 !#

@@ -66,6 +66,11 @@ fn main() {
                 .arg(Arg::with_name("ROLE").short("r").long("role").takes_value(true))
                 .arg(Arg::with_name("NAME").index(1).required(true))
                 .arg(Arg::with_name("TOPIC").index(2).required(true))
+                .arg(Arg::with_name("CONTENTS").index(3).multiple(true).required(false)))
+            .subcommand(SubCommand::with_name("reply")
+                .about("reply to the sender of a topic")
+                .arg(Arg::with_name("SRC_TOPIC").index(1).required(true))
+                .arg(Arg::with_name("TOPIC").index(2).required(true))
                 .arg(Arg::with_name("CONTENTS").index(3).multiple(true).required(false))))
         .subcommand(SubCommand::with_name("agent")
             .about("manage the agent server")
@@ -112,6 +117,7 @@ fn main() {
                 match sub_m.subcommand_name() {
                     Some("get") => cmd_getmsg(sub_m.subcommand_matches("get").unwrap()),
                     Some("send") => cmd_send_script(sub_m.subcommand_matches("send").unwrap()),
+                    Some("reply") => cmd_reply_script(sub_m.subcommand_matches("reply").unwrap()),
                     Some(subcmd) => {
                         error!("unsupported command {}", subcmd);
                         Err(Error::CLI(clap::Error::with_description("unsupported command",
@@ -401,6 +407,26 @@ fn cmd_send_script<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let contents = kv_map(app_m.values_of("CONTENTS"));
     let req = runtime::ScriptRequest::SendMsg {
         dst: app_m.value_of("NAME").unwrap().to_string(),
+        topic: app_m.value_of("TOPIC").unwrap().to_string(),
+        contents: value::Value::from_flat_map(contents),
+    };
+    let builder = TcpClient::new(runtime::ScriptClientProto);
+    let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
+        .map_err(Error::IO)?;
+    match resp {
+        runtime::ScriptResponse::SendMsg { dst: _, topic: _ } => Ok(()),
+        _ => Err(Error::BadResponse),
+    }
+}
+
+fn cmd_reply_script<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
+    let mut core = Core::new()?;
+    let handle = core.handle();
+    let addr_str = std::env::var("ADDR").map_err(Error::Env)?;
+    let addr = addr_str.parse().map_err(Error::AddrParse)?;
+    let contents = kv_map(app_m.values_of("CONTENTS"));
+    let req = runtime::ScriptRequest::ReplyMsg {
+        src_topic: app_m.value_of("SRC_TOPIC").unwrap().to_string(),
         topic: app_m.value_of("TOPIC").unwrap().to_string(),
         contents: value::Value::from_flat_map(contents),
     };

@@ -34,6 +34,11 @@ pub enum Request {
         topic: String,
         contents: Obj,
     },
+    ReplyMsg {
+        src_topic: String,
+        topic: String,
+        contents: Obj,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -48,6 +53,7 @@ pub enum Response {
         value: String,
     },
     SendMsg { dst: String, topic: String },
+    Error(String),
 }
 
 impl Codec for ServiceCodec {
@@ -253,6 +259,23 @@ impl Service for ScriptService {
                 Response::SendMsg {
                     dst: dst.to_string(),
                     topic: topic.to_string(),
+                }
+            }
+            Request::ReplyMsg { ref src_topic, ref topic, ref contents } => {
+                if let Some(ref src_msg) = ctx.msgs.get(src_topic) {
+                    let mut actions = self.actions.lock().unwrap();
+                    actions.push(Action::SendMsg {
+                        dst: src_msg.src.to_string(),
+                        topic: topic.to_string(),
+                        contents: contents.clone(),
+                    });
+                    drop(actions);
+                    Response::SendMsg {
+                        dst: src_msg.src.to_string(),
+                        topic: topic.to_string(),
+                    }
+                } else {
+                    Response::Error(format!("topic {} not found", topic))
                 }
             }
         };

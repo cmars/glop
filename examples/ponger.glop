@@ -1,5 +1,5 @@
 when (message ping from pinger as ponger) #!/bin/bash
 set -e
 echo "ping"
-glop msg send pinger pong
+glop msg reply ping pong
 !#
