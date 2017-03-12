@@ -65,7 +65,7 @@ impl<S: Storage> State<S> {
     pub fn eval(&mut self, m: Match) -> Result<Option<Transaction>> {
         debug!("State.eval: {:?}", &m);
         let (seq, vars) = self.storage.load()?;
-        let msgs = self.storage.next_messages(&m.msg_filters)?;
+        let msgs = self.storage.next_messages(&m.filters())?;
         let ctx = Context::new(vars, msgs);
         let txn = Transaction::new(m, seq, ctx);
         if txn.eval() {
@@ -86,8 +86,8 @@ impl<S: Storage> State<S> {
         let mut txn = txn;
         let mut vars = self.storage.vars().clone();
         let mut self_msgs = Vec::new();
-        let matched_topics = txn.m.topics();
         let actions = txn.apply()?;
+        let matched_topics = txn.matched_topics();
         for action in actions {
             debug!(target: "State.commit", "action {:?}", action);
             match &action {

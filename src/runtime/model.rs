@@ -6,9 +6,9 @@ use value::{Identifier, Obj, Value};
 #[derive(Clone, Debug)]
 pub struct Match {
     pub conditions: Vec<Condition>,
-    pub msg_filters: HashSet<MessageFilter>,
     pub actions: Vec<Action>,
     pub acting_role: Option<String>,
+    msg_filters: HashSet<MessageFilter>,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -45,6 +45,16 @@ impl Match {
         m_exc.actions = m_ast.actions.iter().map(|a_ast| Action::new(a_ast)).collect();
         m_exc.acting_role = m_ast.acting_role.clone();
         m_exc
+    }
+
+    pub fn filters(&self) -> HashSet<MessageFilter> {
+        let mut result = self.msg_filters.clone();
+        for action in &self.actions {
+            if let &Action::Match(ref m) = action {
+                result.extend(m.filters());
+            }
+        }
+        result
     }
 
     pub fn topics(&self) -> HashSet<String> {
@@ -126,6 +136,7 @@ pub enum Action {
     SetVar(Identifier, String),
     UnsetVar(Identifier),
     Script(String),
+    Match(Match),
     SendMsg {
         dst: String,
         topic: String,
@@ -141,6 +152,7 @@ impl Action {
             }
             &ast::Action::UnsetVar(ref k) => Action::UnsetVar(Identifier::from_ast(k)),
             &ast::Action::Script(ref contents) => Action::Script(contents.to_string()),
+            &ast::Action::Match(ref m) => Action::Match(Match::new_from_ast(m)),
         }
     }
 }

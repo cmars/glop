@@ -4,6 +4,7 @@ extern crate env_logger;
 extern crate textnonce;
 
 use std;
+use std::collections::HashMap;
 
 use super::*;
 use super::super::grammar;
@@ -16,6 +17,22 @@ const TWO_MSGS_IS_SET: &'static str = r#"when (message foo, message bar, is_set 
 const SIMPLE_EQUAL: &'static str = r#"when (foo == bar) { var unset foo; }"#;
 const SIMPLE_NOT_EQUAL: &'static str = r#"when (foo != bar) { var set foo bar; }"#;
 const SIMPLE_IS_SET: &'static str = r#"when (is_set foo) { var unset foo; }"#;
+const NESTED_COND: &'static str = r#"when (message foo) {
+    when (is_set bar) {
+        var set found true;
+    }
+    when (is_unset bar) {
+        var set found false;
+    }
+}"#;
+const NESTED_TWO_MSGS: &'static str = r#"when (message foo) {
+    when (message bar, is_set look_at_bar) {
+        var set found true;
+    }
+    when (is_unset look_at_bar) {
+        var set found false;
+    }
+}"#;
 
 fn test_msg(topic: &str, contents: Obj) -> Message {
     Message {
@@ -551,4 +568,98 @@ fn preserve_unmatched_message<T: Storage>(f: StateFactory<T>) {
         Some(_) => panic!("unexpected match"),
         None => {}
     };
+}
+
+#[test]
+fn mem_nested_cond() {
+    nested_cond(mem_state)
+}
+
+#[test]
+fn durable_nested_cond() {
+    nested_cond(durable_state)
+}
+
+fn nested_cond<T: Storage>(f: StateFactory<T>) {
+    setup();
+    let m_exc_nc = Match::new_from_ast(&parse_one_match(NESTED_COND));
+    let (st, _cleanup) = f();
+    let mut st = st;
+    st.mut_storage().push_msg(test_msg("foo", Obj::new())).unwrap();
+    st.mut_storage()
+        .save(0,
+              [("bar".to_string(), Value::from_str("blah"))].iter().cloned().collect())
+        .unwrap();
+    let mut txn = match st.eval(m_exc_nc.clone()).unwrap() {
+        Some(txn) => {
+            assert_eq!(txn.seq, 1);
+            txn
+        }
+        None => panic!("expected match"),
+    };
+    assert!(st.commit(&mut txn).is_ok());
+    assert_eq!(st.mut_storage().vars().get("found"), Some(&Value::from_str("true")));
+}
+
+#[test]
+fn mem_nested_two_msgs() {
+    nested_two_msgs(mem_state)
+}
+
+#[test]
+fn durable_nested_two_msgs() {
+    nested_two_msgs(durable_state)
+}
+
+fn nested_two_msgs<T: Storage>(f: StateFactory<T>) {
+    setup();
+    let m_exc_ntm = Match::new_from_ast(&parse_one_match(NESTED_TWO_MSGS));
+    let (st, _cleanup) = f();
+    let mut st = st;
+    st.mut_storage().push_msg(test_msg("foo", Obj::new())).unwrap();
+    st.mut_storage().push_msg(test_msg("bar", Obj::new())).unwrap();
+    st.mut_storage()
+        .save(0,
+              [("look_at_bar".to_string(), Value::from_str("true"))].iter().cloned().collect())
+        .unwrap();
+    let mut txn = match st.eval(m_exc_ntm.clone()).unwrap() {
+        Some(txn) => {
+            assert_eq!(txn.seq, 1);
+            txn
+        }
+        None => panic!("expected match"),
+    };
+    assert!(st.commit(&mut txn).is_ok());
+    assert_eq!(st.storage().vars().get("found"), Some(&Value::from_str("true")));
+
+    // Both messages present, bar match unset
+    st.mut_storage().push_msg(test_msg("foo", Obj::new())).unwrap();
+    st.mut_storage().push_msg(test_msg("bar", Obj::new())).unwrap();
+    st.mut_storage().save(2, HashMap::new()).unwrap();  // clear state vars
+    let mut txn = match st.eval(m_exc_ntm.clone()).unwrap() {
+        Some(txn) => {
+            assert_eq!(txn.seq, 3);
+            txn
+        }
+        None => panic!("expected match"),
+    };
+    assert!(st.commit(&mut txn).is_ok());
+    assert_eq!(st.storage().vars().get("look_at_bar"), None);
+    assert_eq!(st.storage().vars().get("found"), Some(&Value::from_str("false")));
+    // foo message was matched; bar message was unmatched
+    let msgs = st.mut_storage()
+        .next_messages(&[MessageFilter {
+                             topic: "bar".to_string(),
+                             src_role: None,
+                         },
+                         MessageFilter {
+                             topic: "foo".to_string(),
+                             src_role: None,
+                         }]
+            .iter()
+            .cloned()
+            .collect())
+        .unwrap();
+    assert!(msgs.contains_key("bar"));
+    assert!(!msgs.contains_key("foo"));
 }

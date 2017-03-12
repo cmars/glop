@@ -1,6 +1,7 @@
 extern crate textnonce;
 
 use std;
+use std::collections::HashSet;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
@@ -15,6 +16,7 @@ pub struct Transaction {
     pub seq: i32,
     pub ctx: Arc<Mutex<Context>>,
     pub applied: Vec<Action>,
+    matched_topics: HashSet<String>,
 }
 
 impl Transaction {
@@ -24,13 +26,19 @@ impl Transaction {
             seq: seq,
             ctx: Arc::new(Mutex::new(ctx)),
             applied: vec![],
+            matched_topics: HashSet::new(),
         }
     }
 
     pub fn apply(&mut self) -> Result<Vec<Action>> {
-        let actions = self.m.actions.clone();
+        self.matched_topics = self.m.topics();
+        let mut actions = self.m.actions.clone();
         let mut applied: Vec<Action> = vec![];
-        for action in actions {
+        loop {
+            if actions.is_empty() {
+                return Ok(applied);
+            }
+            let action = actions.remove(0);
             let mut resulting_actions = match action {
                 Action::SetVar(ref k, ref v) => {
                     let mut ctx = self.ctx.lock().unwrap();
@@ -43,16 +51,29 @@ impl Transaction {
                     vec![action.clone()]
                 }
                 Action::Script(ref contents) => self.exec_script(contents)?,
-                Action::SendMsg { dst: _, topic: _, contents: _ } => vec![action.clone()],
+                Action::SendMsg { dst: _, topic: _, contents: _ } => vec![action],
+                Action::Match(ref m) => {
+                    if self.eval_match(m) {
+                        self.matched_topics.extend(m.topics());
+                        actions.append(&mut m.actions.clone())
+                    }
+                    continue;
+                }
             };
             applied.append(&mut resulting_actions);
         }
-        Ok(applied)
+    }
+
+    pub fn matched_topics(&self) -> HashSet<String> {
+        self.matched_topics.clone()
     }
 
     pub fn eval(&self) -> bool {
-        self.m
-            .conditions
+        self.eval_match(&self.m)
+    }
+
+    fn eval_match(&self, m: &Match) -> bool {
+        m.conditions
             .iter()
             .fold(true, |acc, c| acc && self.eval_condition(c))
     }

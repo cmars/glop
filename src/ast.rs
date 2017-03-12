@@ -62,6 +62,7 @@ pub enum Action {
     SetVar(Identifier, String),
     UnsetVar(Identifier),
     Script(String),
+    Match(Match),
 }
 
 use std::fmt;
@@ -72,6 +73,7 @@ impl fmt::Display for Action {
             &Action::SetVar(ref k, ref v) => write!(f, "var set {} {};", FmtIdentifier(k), v),
             &Action::UnsetVar(ref k) => write!(f, "var unset {};", FmtIdentifier(k)),
             &Action::Script(ref v) => write!(f, r#"script {}!#"#, v),
+            &Action::Match(ref v) => write!(f, "{}", v),
         }
     }
 }
