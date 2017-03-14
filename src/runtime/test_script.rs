@@ -35,21 +35,12 @@ when (message init) {
     var set foo bar;
     script #!/bin/bash
 set -e
-[ -n "$ADDR" ]
-PORT=$(echo ${ADDR} | sed 's/.*://')
+[ -n "$GLOP_SCRIPT_ADDR" ]
+[ -n "$GLOP_SCRIPT_KEY" ]
 
-# glop var get foo
-FOO=$(nc 127.0.0.1 ${PORT} <<EOF
-{"GetVar":{"key":"foo"}}
-EOF)
-echo ${FOO}
-FOO=$(echo ${FOO} | jq -r '.GetVar.value')
-
-# glop var set foo hello
-nc 127.0.0.1 ${PORT} <<EOF
-{"SetVar":{"key":"foo","value":"hello-${FOO}"}}
-EOF
-
+FOO=$(cargo run var get foo)
+[ "${FOO}" = "bar" ]
+cargo run var set foo hello-${FOO}
 !#
 }
 "###;
@@ -57,19 +48,15 @@ const SCRIPT_SERVER_ACCESS_MSG: &'static str = r###"
 when (message init) {
     script #!/bin/bash
 set -e
-[ -n "$ADDR" ]
-PORT=$(echo ${ADDR} | sed 's/.*://')
+[ -n "$GLOP_SCRIPT_ADDR" ]
+[ -n "$GLOP_SCRIPT_KEY" ]
 
 # glop msg get init foo
-FOO=$(nc 127.0.0.1 ${PORT} <<EOF
-{"GetMsg":{"topic":"init","key":"foo"}}
-EOF)
-[ "$(echo ${FOO} | jq -r '.GetMsg.value')" = "bar" ]
+FOO=$(cargo run msg get init foo)
+[ "${FOO}" = "bar" ]
 
 # glop var set all good
-nc 127.0.0.1 ${PORT} <<EOF
-{"SetVar":{"key":"all","value":"good"}}
-EOF
+cargo run var set all good
 !#
 }
 "###;

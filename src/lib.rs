@@ -8,6 +8,7 @@ mod ast;
 mod cleanup;
 
 pub mod agent;
+pub mod crypto;
 pub mod error;
 pub mod grammar {
     include!(concat!(env!("OUT_DIR"), "/glop.rs"));

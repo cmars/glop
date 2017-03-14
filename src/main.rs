@@ -219,10 +219,11 @@ fn cmd_run<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
 fn cmd_getvar<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let mut core = tokio_core::reactor::Core::new().map_err(Error::IO)?;
     let handle = core.handle();
-    let addr_str = std::env::var("ADDR").map_err(Error::Env)?;
+    let addr_str = std::env::var("GLOP_SCRIPT_ADDR").map_err(Error::Env)?;
     let addr = addr_str.parse().map_err(Error::AddrParse)?;
     let req = runtime::ScriptRequest::GetVar { key: app_m.value_of("KEY").unwrap().to_string() };
-    let builder = TcpClient::new(runtime::ScriptClientProto);
+    let proto = runtime::ScriptClientProto::new_from_env()?;
+    let builder = TcpClient::new(proto);
     let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
         .map_err(Error::IO)?;
     match resp {
@@ -237,13 +238,14 @@ fn cmd_getvar<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
 fn cmd_setvar<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let mut core = Core::new()?;
     let handle = core.handle();
-    let addr_str = std::env::var("ADDR").map_err(Error::Env)?;
+    let addr_str = std::env::var("GLOP_SCRIPT_ADDR").map_err(Error::Env)?;
     let addr = addr_str.parse().map_err(Error::AddrParse)?;
     let req = runtime::ScriptRequest::SetVar {
         key: app_m.value_of("KEY").unwrap().to_string(),
         value: app_m.value_of("VALUE").unwrap().to_string(),
     };
-    let builder = TcpClient::new(runtime::ScriptClientProto);
+    let proto = runtime::ScriptClientProto::new_from_env()?;
+    let builder = TcpClient::new(proto);
     let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
         .map_err(Error::IO)?;
     match resp {
@@ -255,10 +257,11 @@ fn cmd_setvar<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
 fn cmd_unsetvar<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let mut core = Core::new()?;
     let handle = core.handle();
-    let addr_str = std::env::var("ADDR").map_err(Error::Env)?;
+    let addr_str = std::env::var("GLOP_SCRIPT_ADDR").map_err(Error::Env)?;
     let addr = addr_str.parse().map_err(Error::AddrParse)?;
     let req = runtime::ScriptRequest::UnsetVar { key: app_m.value_of("KEY").unwrap().to_string() };
-    let builder = TcpClient::new(runtime::ScriptClientProto);
+    let proto = runtime::ScriptClientProto::new_from_env()?;
+    let builder = TcpClient::new(proto);
     let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
         .map_err(Error::IO)?;
     match resp {
@@ -270,13 +273,14 @@ fn cmd_unsetvar<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
 fn cmd_getmsg<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let mut core = Core::new()?;
     let handle = core.handle();
-    let addr_str = std::env::var("ADDR").map_err(Error::Env)?;
+    let addr_str = std::env::var("GLOP_SCRIPT_ADDR").map_err(Error::Env)?;
     let addr = addr_str.parse().map_err(Error::AddrParse)?;
     let req = runtime::ScriptRequest::GetMsg {
         topic: app_m.value_of("TOPIC").unwrap().to_string(),
         key: app_m.value_of("KEY").unwrap().to_string(),
     };
-    let builder = TcpClient::new(runtime::ScriptClientProto);
+    let proto = runtime::ScriptClientProto::new_from_env()?;
+    let builder = TcpClient::new(proto);
     let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
         .map_err(Error::IO)?;
     match resp {
@@ -402,7 +406,7 @@ fn cmd_introduce<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
 fn cmd_send_script<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let mut core = Core::new()?;
     let handle = core.handle();
-    let addr_str = std::env::var("ADDR").map_err(Error::Env)?;
+    let addr_str = std::env::var("GLOP_SCRIPT_ADDR").map_err(Error::Env)?;
     let addr = addr_str.parse().map_err(Error::AddrParse)?;
     let contents = kv_map(app_m.values_of("CONTENTS"));
     let req = runtime::ScriptRequest::SendMsg {
@@ -410,7 +414,8 @@ fn cmd_send_script<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
         topic: app_m.value_of("TOPIC").unwrap().to_string(),
         contents: value::Value::from_flat_map(contents),
     };
-    let builder = TcpClient::new(runtime::ScriptClientProto);
+    let proto = runtime::ScriptClientProto::new_from_env()?;
+    let builder = TcpClient::new(proto);
     let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
         .map_err(Error::IO)?;
     match resp {
@@ -422,7 +427,7 @@ fn cmd_send_script<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
 fn cmd_reply_script<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let mut core = Core::new()?;
     let handle = core.handle();
-    let addr_str = std::env::var("ADDR").map_err(Error::Env)?;
+    let addr_str = std::env::var("GLOP_SCRIPT_ADDR").map_err(Error::Env)?;
     let addr = addr_str.parse().map_err(Error::AddrParse)?;
     let contents = kv_map(app_m.values_of("CONTENTS"));
     let req = runtime::ScriptRequest::ReplyMsg {
@@ -430,7 +435,8 @@ fn cmd_reply_script<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
         topic: app_m.value_of("TOPIC").unwrap().to_string(),
         contents: value::Value::from_flat_map(contents),
     };
-    let builder = TcpClient::new(runtime::ScriptClientProto);
+    let proto = runtime::ScriptClientProto::new_from_env()?;
+    let builder = TcpClient::new(proto);
     let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
         .map_err(Error::IO)?;
     match resp {

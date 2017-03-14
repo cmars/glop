@@ -1,4 +1,6 @@
+extern crate base64;
 extern crate futures;
+extern crate sodiumoxide;
 extern crate serde_json;
 extern crate tokio_core;
 extern crate tokio_proto;
@@ -11,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::process::Command;
 
 use self::futures::{future, Future, BoxFuture, Sink, Stream};
+use self::sodiumoxide::crypto::secretbox;
 use self::tokio_core::io::{Codec, EasyBuf, Framed, Io};
 use self::tokio_process::CommandExt;
 use self::tokio_service::Service;
@@ -18,9 +21,6 @@ use self::tokio_service::Service;
 use super::*;
 use self::context::Context;
 use self::value::{Identifier, Obj, Value};
-
-pub struct ClientCodec;
-pub struct ServiceCodec;
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug)]
@@ -55,6 +55,8 @@ pub enum Response {
     SendMsg { dst: String, topic: String },
     Error(String),
 }
+
+pub struct ServiceCodec;
 
 impl Codec for ServiceCodec {
     type In = Request;
@@ -103,6 +105,8 @@ impl Codec for ServiceCodec {
     }
 }
 
+pub struct ClientCodec;
+
 impl Codec for ClientCodec {
     type Out = Request;
     type In = Response;
@@ -150,16 +154,31 @@ impl Codec for ClientCodec {
     }
 }
 
-pub struct ClientProto;
+pub struct ClientProto {
+    key: secretbox::Key,
+}
+
+impl ClientProto {
+    pub fn new_from_env() -> Result<ClientProto> {
+        let key_str = std::env::var("GLOP_SCRIPT_KEY").map_err(Error::Env)?;
+        let key_bytes =
+            base64::decode(&key_str).map_err(|e| Error::InvalidArgument(format!("{}", e)))?;
+        let key = match secretbox::Key::from_slice(&key_bytes) {
+            Some(k) => k,
+            None => return Err(Error::InvalidArgument("GLOP_SCRIPT_KEY".to_string())),
+        };
+        Ok(ClientProto { key: key })
+    }
+}
 
 impl<T: Io + 'static> tokio_proto::pipeline::ClientProto<T> for ClientProto {
     type Request = Request;
     type Response = Response;
-    type Transport = Framed<T, ClientCodec>;
+    type Transport = Framed<T, crypto::SecretBoxCodec<ClientCodec>>;
     type BindTransport = std::io::Result<Self::Transport>;
 
     fn bind_transport(&self, io: T) -> Self::BindTransport {
-        Ok(io.framed(ClientCodec))
+        Ok(io.framed(crypto::SecretBoxCodec::new(ClientCodec, self.key.clone())))
     }
 }
 
@@ -297,9 +316,11 @@ pub fn run_script(ctx: Arc<Mutex<Context>>, script_path: &str) -> Result<Vec<Act
         let ctx = ctx.lock().unwrap();
         ctx.set_env(cmd);
     }
+    let key = secretbox::gen_key();
     let actions = Arc::new(Mutex::new(vec![]));
     let server_actions = actions.clone();
-    let child = cmd.env("ADDR", format!("{}", listen_addr))
+    let child = cmd.env("GLOP_SCRIPT_ADDR", format!("{}", listen_addr))
+        .env("GLOP_SCRIPT_KEY", base64::encode(&key.0))
         .output_async(&handle)
         .then(|result| {
             match result {
@@ -324,7 +345,8 @@ pub fn run_script(ctx: Arc<Mutex<Context>>, script_path: &str) -> Result<Vec<Act
             }
         });
     let server = connections.for_each(move |(socket, _peer_addr)| {
-            let (wr, rd) = socket.framed(ServiceCodec).split();
+            let (wr, rd) = socket.framed(crypto::SecretBoxCodec::new(ServiceCodec, key.clone()))
+                .split();
             let service = ScriptService::new(ctx.clone(), server_actions.clone());
             let responses = rd.and_then(move |req| service.call(req));
             let responder = wr.send_all(responses).then(|_| Ok(()));
