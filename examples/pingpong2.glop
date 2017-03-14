@@ -8,14 +8,14 @@ when (message init) {
 
 when (ping == true) #!/bin/bash
 echo ping
-export ADDR
+export GLOP_SCRIPT_ADDR
 glop var set ping false
 glop var set pong true
 !#
 
 when (pong == true) #!/bin/bash
 echo pong
-export ADDR
+export GLOP_SCRIPT_ADDR
 glop var set ping true
 glop var set pong false
 !#

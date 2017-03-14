@@ -35,8 +35,8 @@ when (message init) {
     var set foo bar;
     script #!/bin/bash
 set -e
-[ -n "$ADDR" ]
-PORT=$(echo ${ADDR} | sed 's/.*://')
+[ -n "$GLOP_SCRIPT_ADDR" ]
+PORT=$(echo ${GLOP_SCRIPT_ADDR} | sed 's/.*://')
 
 # glop var get foo
 FOO=$(nc 127.0.0.1 ${PORT} <<EOF
@@ -57,8 +57,8 @@ const SCRIPT_SERVER_ACCESS_MSG: &'static str = r###"
 when (message init) {
     script #!/bin/bash
 set -e
-[ -n "$ADDR" ]
-PORT=$(echo ${ADDR} | sed 's/.*://')
+[ -n "$GLOP_SCRIPT_ADDR" ]
+PORT=$(echo ${GLOP_SCRIPT_ADDR} | sed 's/.*://')
 
 # glop msg get init foo
 FOO=$(nc 127.0.0.1 ${PORT} <<EOF
