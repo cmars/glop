@@ -312,10 +312,11 @@ pub fn run_script(ctx: Arc<Mutex<Context>>, script_path: &str) -> Result<Vec<Act
         .map_err(error::Error::IO)?;
     let connections = listener.incoming();
     let mut cmd = &mut Command::new(script_path);
-    {
+    let src = {
         let ctx = ctx.lock().unwrap();
         ctx.set_env(cmd);
-    }
+        ctx.src.to_string()
+    };
     let key = secretbox::gen_key();
     let actions = Arc::new(Mutex::new(vec![]));
     let server_actions = actions.clone();
@@ -327,10 +328,14 @@ pub fn run_script(ctx: Arc<Mutex<Context>>, script_path: &str) -> Result<Vec<Act
                 Ok(output) => {
                     let mut stdout = String::from_utf8(output.stdout).unwrap();
                     stdout.pop();
-                    info!("stdout: {}", stdout);
+                    if !stdout.is_empty() {
+                        info!("{}: stdout: {}", src, stdout);
+                    }
                     let mut stderr = String::from_utf8(output.stderr).unwrap();
                     stderr.pop();
-                    info!("stderr: {}", stderr);
+                    if !stderr.is_empty() {
+                        info!("{}: stderr: {}", src, stderr);
+                    }
                     if output.status.success() {
                         Ok(())
                     } else {

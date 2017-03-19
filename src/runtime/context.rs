@@ -8,13 +8,15 @@ use super::value::{Identifier, Message, Value};
 pub struct Context {
     pub vars: HashMap<String, Value>,
     pub msgs: HashMap<String, Message>,
+    pub src: String,
 }
 
 impl Context {
-    pub fn new(vars: HashMap<String, Value>, msgs: HashMap<String, Message>) -> Context {
+    pub fn new(src: &str, vars: HashMap<String, Value>, msgs: HashMap<String, Message>) -> Context {
         Context {
             vars: vars,
             msgs: msgs,
+            src: src.to_string(),
         }
     }
 

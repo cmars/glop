@@ -66,7 +66,7 @@ impl<S: Storage> State<S> {
         debug!("State.eval: {:?}", &m);
         let (seq, vars) = self.storage.load()?;
         let msgs = self.storage.next_messages(&m.filters())?;
-        let ctx = Context::new(vars, msgs);
+        let ctx = Context::new(&self.src, vars, msgs);
         let txn = Transaction::new(m, seq, ctx);
         if txn.eval() {
             debug!("State.eval: MATCHED");
@@ -105,7 +105,7 @@ impl<S: Storage> State<S> {
                         topic: topic.to_string(),
                         contents: contents.clone(),
                     };
-                    info!("send {:?}", msg);
+                    debug!("send {:?}", msg);
                     if dst == "self" {
                         self_msgs.push(msg);
                     } else {
