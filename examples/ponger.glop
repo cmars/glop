@@ -1,3 +1,8 @@
+when (message intro from pinger as ponger) #!/bin/bash
+set -e
+glop msg reply intro pong
+!#
+
 when (message ping from pinger as ponger) #!/bin/bash
 set -e
 echo "ping"

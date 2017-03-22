@@ -243,6 +243,7 @@ impl DurableStorage {
             .mode(0o700)
             .create(&topics_path)
             .map_err(error::Error::IO)?;
+        DurableStorage::recover_all(&topics_path)?;
         Ok(DurableStorage {
             checkpoint: DurableCheckpoint {
                 seq: 0,
@@ -252,6 +253,35 @@ impl DurableStorage {
             topics: HashMap::new(),
             topics_path: topics_path,
         })
+    }
+
+    fn recover_all(path: &str) -> Result<()> {
+        let dirh = std::fs::read_dir(path)?;
+        for maybe_dirent in dirh {
+            match maybe_dirent {
+                Ok(dirent) => {
+                    if let Ok(ftype) = dirent.file_type() {
+                        if ftype.is_dir() {
+                            let topic_path = dirent.path().to_str().unwrap().to_string();
+                            match DurableStorage::recover_topic(&topic_path) {
+                                Ok(_) => {}
+                                Err(e) => {
+                                    warn!("failed to recover topic queue {}: {}", &topic_path, e)
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => warn!("error recovering topic queues: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    fn recover_topic(path: &str) -> Result<()> {
+        let q = spoolq::Queue::<Message>::new(path)?;
+        q.recover()?;
+        Ok(())
     }
 
     fn new_queue(&self, topic: &str) -> Result<spoolq::Queue<Message>> {
@@ -305,6 +335,9 @@ impl Storage for DurableStorage {
         }
         if !std::path::Path::new(&self.checkpoint_path).exists() {
             panic!("where is the checkpoint file? {}", &self.checkpoint_path);
+        }
+        for q in self.topics.values_mut() {
+            q.flush()?;
         }
         self.checkpoint = chk;
         Ok(())
