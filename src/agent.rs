@@ -3,6 +3,7 @@ extern crate futures;
 extern crate futures_cpupool;
 extern crate itertools;
 extern crate serde_json;
+extern crate sodiumoxide;
 extern crate tokio_core;
 extern crate tokio_proto;
 extern crate tokio_service;
@@ -18,6 +19,7 @@ use self::fs2::FileExt;
 use self::futures::{Future, Stream, Sink};
 use self::futures::sync::mpsc;
 use self::itertools::Itertools;
+use self::sodiumoxide::crypto::secretbox;
 use self::tokio_core::io::{Framed, Io};
 use self::tokio_service::Service as TokioService;
 
@@ -263,7 +265,7 @@ impl<S: Storage + Send> ServiceState<S> {
     }
 
     fn remove(&mut self, name: &str) -> Result<(), Error> {
-        self.storage.remove(name)?;
+        self.storage.remove_agent(name)?;
         self.outboxes.remove(name);
         Ok(())
     }
@@ -314,7 +316,7 @@ impl<S: Storage + Send> Service<S> {
                  state: &mut ServiceState<S>)
                  -> Result<(), Error> {
         self.spawn_agent(name, &glop, state)?;
-        state.storage.add(name.to_string(), glop)
+        state.storage.add_agent(name.to_string(), glop)
     }
 
     fn spawn_agent(&self,
@@ -401,6 +403,30 @@ impl<S: Storage + Send> Service<S> {
     }
 }
 
+pub enum Token {
+    Admin { name: String, key: secretbox::Key },
+    Peer {
+        addr: std::net::SocketAddr,
+        key: secretbox::Key,
+    },
+}
+
+impl Token {
+    pub fn to_str(&self) -> String {
+        match self {
+            &Token::Admin { ref name, key: _ } => name.to_string(),
+            &Token::Peer { ref addr, key: _ } => format!("{}", addr),
+        }
+    }
+
+    pub fn key(&self) -> &secretbox::Key {
+        match self {
+            &Token::Admin { ref key, name: _ } => key,
+            &Token::Peer { ref key, addr: _ } => key,
+        }
+    }
+}
+
 pub trait Storage {
     type RuntimeStorage: runtime::Storage + Send;
 
@@ -408,9 +434,14 @@ pub trait Storage {
                  name: &str,
                  outbox: Box<runtime::Outbox + Send + 'static>)
                  -> Result<runtime::State<Self::RuntimeStorage>, Error>;
-    fn add(&mut self, name: String, glop: ast::Glop) -> Result<(), Error>;
-    fn remove(&mut self, name: &str) -> Result<(), Error>;
+    fn add_agent(&mut self, name: String, glop: ast::Glop) -> Result<(), Error>;
+    fn remove_agent(&mut self, name: &str) -> Result<(), Error>;
     fn agents(&self) -> Result<HashMap<String, ast::Glop>, Error>;
+
+    // fn add_token(&mut self, token: Token) -> Result<String, Error>
+    // fn remove_token(&mut self, id: String) -> Result<String, Error>
+    // fn tokens(&self) -> Result<Vec<Token>>,
+    //
 }
 
 #[derive(Clone)]
@@ -435,7 +466,7 @@ impl Storage for MemStorage {
         Ok(runtime::State::new_outbox(name, runtime::MemStorage::new(), outbox))
     }
 
-    fn add(&mut self, name: String, glop: ast::Glop) -> Result<(), Error> {
+    fn add_agent(&mut self, name: String, glop: ast::Glop) -> Result<(), Error> {
         if self.agents.contains_key(&name) {
             return Err(Error::AgentExists(name));
         }
@@ -443,7 +474,7 @@ impl Storage for MemStorage {
         Ok(())
     }
 
-    fn remove(&mut self, name: &str) -> Result<(), Error> {
+    fn remove_agent(&mut self, name: &str) -> Result<(), Error> {
         self.agents.remove(name);
         Ok(())
     }
@@ -515,14 +546,14 @@ impl Storage for DurableStorage {
         Ok(runtime::State::new_outbox(name, runtime_storage, outbox))
     }
 
-    fn add(&mut self, name: String, glop: ast::Glop) -> Result<(), Error> {
+    fn add_agent(&mut self, name: String, glop: ast::Glop) -> Result<(), Error> {
         let mut agents = self.load()?;
         agents.insert(name, glop);
         self.save(agents)?;
         Ok(())
     }
 
-    fn remove(&mut self, name: &str) -> Result<(), Error> {
+    fn remove_agent(&mut self, name: &str) -> Result<(), Error> {
         let mut agents = self.load()?;
         agents.remove(name);
         self.save(agents)?;
@@ -585,74 +616,40 @@ impl<T: Io + 'static> tokio_proto::pipeline::ClientProto<T> for ClientProto {
     }
 }
 
-pub fn run_server() -> Result<(), Error> {
-    let mut core = tokio_core::reactor::Core::new().map_err(Error::IO)?;
-    let handle = core.handle();
-    let addr = "127.0.0.1:0".parse().unwrap();
-    let listener = tokio_core::net::TcpListener::bind(&addr, &handle).map_err(Error::IO)?;
-    let listen_addr = &listener.local_addr().map_err(Error::IO)?;
-    info!("server listening on {}", &listen_addr);
-    let _lock = agent_lock(listen_addr).map_err(Error::IO)?;
-    let connections = listener.incoming();
-    let glop_dir = glop_dir().map_err(Error::IO)?;
-    debug!("glop_dir={}", glop_dir);
-    let svc_storage = DurableStorage::new(&glop_dir)?;
-    let service = Service::new(svc_storage, &handle)?;
-    let server = connections.for_each(move |(socket, _peer_addr)| {
-        let (wr, rd) = socket.framed(ServiceCodec).split();
-        let service = service.clone();
-        let responses = rd.and_then(move |req| service.call(req));
-        let responder = wr.send_all(responses)
-            .or_else(|e| {
-                error!("{}", e);
-                Err(e)
-            })
-            .then(|_| Ok(()));
-        handle.spawn(responder);
-        Ok(())
-    });
-    core.run(server).map_err(Error::IO)
+pub struct Server {
+    addr: std::net::SocketAddr,
+    path: String,
 }
 
-pub fn read_agent_addr() -> std::io::Result<String> {
-    let lock_path = agent_lock_path()?;
-    let mut agent_file = std::fs::File::open(lock_path)?;
-    let mut result = String::new();
-    agent_file.read_to_string(&mut result)?;
-    Ok(result)
-}
-
-fn agent_lock(addr: &std::net::SocketAddr) -> std::io::Result<cleanup::Cleanup> {
-    let lock_path = agent_lock_path()?;
-    let mut f = std::fs::OpenOptions::new().read(true).write(true).create(true).open(&lock_path)?;
-    f.try_lock_exclusive()?;
-    write!(f, "{}", addr)?;
-    f.flush()?;
-    Ok(cleanup::Cleanup::Lock(f, lock_path))
-}
-
-fn glop_dir() -> std::io::Result<String> {
-    let mut path_buf = match std::env::home_dir() {
-        Some(home) => home,
-        None => {
-            return Err(std::io::Error::new(std::io::ErrorKind::Other,
-                                           "cannot determine home directory"))
+impl Server {
+    pub fn new(addr: std::net::SocketAddr, path: &str) -> Server {
+        Server {
+            addr: addr,
+            path: path.to_string(),
         }
-    };
-    path_buf.push(".glop");
-    let path = path_buf.to_str().unwrap().to_string();
-    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&path)?;
-    Ok(path)
-}
+    }
 
-fn agent_lock_path() -> std::io::Result<String> {
-    let mut path_buf = match std::env::home_dir() {
-        Some(home) => home,
-        None => {
-            return Err(std::io::Error::new(std::io::ErrorKind::Other,
-                                           "cannot determine home directory"))
-        }
-    };
-    path_buf.push(".glop.agent");
-    Ok(path_buf.to_str().unwrap().to_string())
+    pub fn run(&self) -> Result<(), Error> {
+        let mut core = tokio_core::reactor::Core::new().map_err(Error::IO)?;
+        let handle = core.handle();
+        let listener = tokio_core::net::TcpListener::bind(&self.addr, &handle).map_err(Error::IO)?;
+        info!("server listening on {}", self.addr);
+        let connections = listener.incoming();
+        let svc_storage = DurableStorage::new(&self.path)?;
+        let service = Service::new(svc_storage, &handle)?;
+        let server = connections.for_each(move |(socket, _peer_addr)| {
+            let (wr, rd) = socket.framed(ServiceCodec).split();
+            let service = service.clone();
+            let responses = rd.and_then(move |req| service.call(req));
+            let responder = wr.send_all(responses)
+                .or_else(|e| {
+                    error!("{}", e);
+                    Err(e)
+                })
+                .then(|_| Ok(()));
+            handle.spawn(responder);
+            Ok(())
+        });
+        core.run(server).map_err(Error::IO)
+    }
 }

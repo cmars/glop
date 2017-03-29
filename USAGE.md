@@ -1,3 +1,5 @@
+% USAGE
+
 # Usage
 
 _Some musings about glop in practice. None of this is implemented yet and it
@@ -5,7 +7,7 @@ might change drastically until glop is released as '1.0'._
 
 ## Starting the agent server
 
-    glop server
+    glop server run
 
 ## Adding agents
 
@@ -91,7 +93,86 @@ they react with. The agents then coordinate amongst themselves what they do
 from there. The colon syntax is of the form `agent-name:role`, used to designed
 each agent and the role it should act in, in the conversation.
 
+# Agent servers
+
+An agent server is initialized explicitly with
+
+    $ glop server init
+
+or implicitly the first time it is started with
+
+    $ glop server run
+
+## Server access tokens
+
+The glop server generates an initial access token, a secret key that encrypts
+and authenticates client-server communication.
+
+Tokens may be created for remote access to the agent server API. For example,
+
+    $ glop server token add bob
+    BGIPBeVLO5lcuWZDn2FrvC9VO6luPPrYK4CSm0iUpcY=
+
+Active tokens may be listed.
+
+    $ glop server token list
+    SHi19sxsov2/6SJ7cPd3IAMieEJtP5zxcogeTXkHl2w= admin
+    BGIPBeVLO5lcuWZDn2FrvC9VO6luPPrYK4CSm0iUpcY= bob
+
+Tokens may be revoked by name.
+
+    $ glop server token revoke bob
+
+Tokens may be revoked by token contents.
+
+    $ glop server token revoke BGIPBeVLO5lcuWZDn2FrvC9VO6luPPrYK4CSm0iUpcY=
+
+## Client-Server access
+
+Clients may add remote agents.
+
+    $ glop remote add website 10.212.34.35 JhnFgFbqO+OA95y+DpPDEjeezvJguGLoosg93FG6yB8=
+
+If the client has remote SSH access to the machine, this is easy to set up.
+
+    $ glop remote add website 10.212.34.35:6709 $(ssh ubuntu@10.212.34.35 "sudo glop server token add cmars")
+
+The glop agent server default, port 6709, is assumed if not specified.
+
+Clients may list remotes.
+
+    $ glop remote list
+    website 10.212.34.35:6709
+
+Clients may remove remotes.
+
+    $ glop remote remove website
+
+Remotes may be used with `glop agent` commands.
+
+    $ glop agent webapp@website webapp.glop
+    $ glop agent add db@db1 db.glop
+    $ glop agent add db@db2 db.glop
+    $ glop agent introduce webapp:db-client@website db:db-server@db1
+    $ glop agent introduce db:db-primary@db1 db:db-replica@db2
+    $ glop agent send webapp@website configure fqdn=foo.bar.com
+    $ glop agent send webapp@website golive
+    $ glop agent send db@db2 backup
+
+## Server-Server access
+
+As the above example illustrates, a client can introduce agents across remotes.
+
+    glop agent introduce foo:fooer@remote1 bar:barrister@remote2
+
+The client will request peer tokens from _remote1_ and _remote2_ as an admin,
+and then send an introduction message to each server with these tokens. Agent
+replies will then go to the introduced counterpart on the other agent server.
+
 # Keeping track of contacts
+
+_Still thinking about this section... Feels like contacts could be stored as
+regular vars maybe?_
 
 Once introduced, agents may need to keep track of their counterpart contacts.
 From within a `match` on a topic from a role,
@@ -118,16 +199,8 @@ A contact may also be removed by resolving the role of the current topic match,
     glop contact remove foo-fighters bye
     !#
 
-## Coordinate across machines
-
-Agents running on different machines can be introduced over SSH.
-
-    glop introduce some-reporting ubuntu@my-cuda-beast:some-theano-based-app
-
 # TODO
 
-- Common message pattern language. Types?
+- Common message pattern language. Well-defined message types?
 - Cleaner distinction between agent "instance" and "template"
 - Agent lifecycle issues. How do they die?
-- Agent internetworking across various protocols systems (SMTP, MQTT, HTTP)
-- PKI drudgery
