@@ -1,4 +1,3 @@
-extern crate fs2;
 extern crate futures;
 extern crate futures_cpupool;
 extern crate itertools;
@@ -11,11 +10,10 @@ extern crate tokio_service;
 use std;
 use std::collections::HashMap;
 use std::error::Error as StdError;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::sync::{Arc, Mutex};
 
-use self::fs2::FileExt;
 use self::futures::{Future, Stream, Sink};
 use self::futures::sync::mpsc;
 use self::itertools::Itertools;
@@ -24,7 +22,6 @@ use self::tokio_core::io::{Framed, Io};
 use self::tokio_service::Service as TokioService;
 
 use super::ast;
-use super::cleanup;
 use super::error::{Error, to_ioerror};
 use super::grammar;
 use super::runtime;
