@@ -18,10 +18,11 @@ use self::futures::{Future, Stream, Sink};
 use self::futures::sync::mpsc;
 use self::itertools::Itertools;
 use self::sodiumoxide::crypto::secretbox;
-use self::tokio_core::io::{Framed, Io};
+use self::tokio_core::io::{Codec, Framed, Io};
 use self::tokio_service::Service as TokioService;
 
 use super::ast;
+use super::crypto;
 use super::error::{Error, to_ioerror};
 use super::grammar;
 use super::runtime;
@@ -55,7 +56,6 @@ pub enum Response {
     Error(String),
 }
 
-pub struct ClientCodec;
 pub struct ServiceCodec;
 
 impl tokio_core::io::Codec for ServiceCodec {
@@ -104,6 +104,8 @@ impl tokio_core::io::Codec for ServiceCodec {
         Ok(())
     }
 }
+
+pub struct ClientCodec;
 
 impl tokio_core::io::Codec for ClientCodec {
     type Out = Request;
@@ -244,12 +246,12 @@ fn read_file(path: &str) -> Result<String, Error> {
 
 type AgentOutboxMap = HashMap<String, mpsc::Sender<Message>>;
 
-struct ServiceState<S: Storage + Send + 'static> {
+struct ServiceState<S: AgentStorage + Send + 'static> {
     storage: S,
     outboxes: AgentOutboxMap,
 }
 
-impl<S: Storage + Send> ServiceState<S> {
+impl<S: AgentStorage + Send> ServiceState<S> {
     pub fn new(storage: S) -> ServiceState<S> {
         ServiceState {
             storage: storage,
@@ -277,13 +279,13 @@ impl<S: Storage + Send> ServiceState<S> {
 }
 
 #[derive(Clone)]
-pub struct Service<S: Storage + Send + 'static> {
+pub struct Service<S: AgentStorage + Send + 'static> {
     state: Arc<Mutex<ServiceState<S>>>,
     handle: tokio_core::reactor::Handle,
     pool: futures_cpupool::CpuPool,
 }
 
-impl<S: Storage + Send> Service<S> {
+impl<S: AgentStorage + Send> Service<S> {
     pub fn new(storage: S, h: &tokio_core::reactor::Handle) -> Result<Service<S>, Error> {
         let svc = Service {
             state: Arc::new(Mutex::new(ServiceState::new(storage))),
@@ -400,6 +402,10 @@ impl<S: Storage + Send> Service<S> {
     }
 }
 
+pub const TOKEN_NAME_LEN: usize = 32;
+
+#[derive(Serialize, Deserialize)]
+#[derive(Clone)]
 pub enum Token {
     Admin { name: String, key: secretbox::Key },
     Peer {
@@ -409,22 +415,22 @@ pub enum Token {
 }
 
 impl Token {
-    pub fn to_str(&self) -> String {
+    pub fn id(&self) -> String {
         match self {
             &Token::Admin { ref name, key: _ } => name.to_string(),
             &Token::Peer { ref addr, key: _ } => format!("{}", addr),
         }
     }
 
-    pub fn key(&self) -> &secretbox::Key {
+    pub fn key(&self) -> secretbox::Key {
         match self {
-            &Token::Admin { ref key, name: _ } => key,
-            &Token::Peer { ref key, addr: _ } => key,
+            &Token::Admin { ref key, name: _ } => key.clone(),
+            &Token::Peer { ref key, addr: _ } => key.clone(),
         }
     }
 }
 
-pub trait Storage {
+pub trait AgentStorage {
     type RuntimeStorage: runtime::Storage + Send;
 
     fn new_state(&self,
@@ -434,26 +440,97 @@ pub trait Storage {
     fn add_agent(&mut self, name: String, glop: ast::Glop) -> Result<(), Error>;
     fn remove_agent(&mut self, name: &str) -> Result<(), Error>;
     fn agents(&self) -> Result<HashMap<String, ast::Glop>, Error>;
+}
 
-    // fn add_token(&mut self, token: Token) -> Result<String, Error>
-    // fn remove_token(&mut self, id: String) -> Result<String, Error>
-    // fn tokens(&self) -> Result<Vec<Token>>,
-    //
+pub trait TokenStorage {
+    fn add_token(&mut self, token: Token) -> Result<(), Error>;
+    fn remove_token(&mut self, id: &str) -> Result<(), Error>;
+    fn token(&self, id: &str) -> Result<Option<Token>, Error>;
+}
+
+pub struct SecureServiceCodec {
+    tokens: Box<TokenStorage + 'static>,
+    codec: Option<crypto::SecretBoxCodec<ServiceCodec>>,
+}
+
+impl SecureServiceCodec {
+    pub fn new(tokens: Box<TokenStorage + 'static>) -> SecureServiceCodec {
+        SecureServiceCodec {
+            tokens: tokens,
+            codec: None,
+        }
+    }
+
+    fn decode_prelude(&mut self,
+                      buf: &mut tokio_core::io::EasyBuf)
+                      -> std::io::Result<Option<<ServiceCodec as tokio_core::io::Codec>::In>> {
+        if let Some(i) = buf.as_slice().iter().take(TOKEN_NAME_LEN).position(|&b| b == b'\n') {
+            // remove the serialized frame from the buffer.
+            let line = buf.drain_to(i);
+
+            // Also remove the '\n'
+            buf.drain_to(1);
+
+            let id = std::str::from_utf8(line.as_slice()).map_err(to_ioerror)?;
+            match self.tokens.token(id) {
+                Ok(Some(ref token)) => {
+                    let mut codec = crypto::SecretBoxCodec::new(ServiceCodec, token.key().clone());
+                    let result = codec.decode(buf)?;
+                    self.codec = Some(codec);
+                    Ok(result)
+                }
+                Ok(None) => {
+                    Err(std::io::Error::new(std::io::ErrorKind::Other,
+                                            format!("missing or invalid token name: {}", id)))
+                }
+                Err(e) => Err(to_ioerror(e)),
+            }
+        } else if buf.len() >= TOKEN_NAME_LEN {
+            Err(std::io::Error::new(std::io::ErrorKind::Other, "missing or invalid prelude"))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+impl tokio_core::io::Codec for SecureServiceCodec {
+    type In = <ServiceCodec as tokio_core::io::Codec>::In;
+    type Out = <ServiceCodec as tokio_core::io::Codec>::Out;
+
+    fn decode(&mut self, buf: &mut tokio_core::io::EasyBuf) -> std::io::Result<Option<Self::In>> {
+        match self.codec {
+            Some(ref mut codec) => codec.decode(buf),
+            None => self.decode_prelude(buf),
+        }
+    }
+
+    fn encode(&mut self, msg: Self::Out, buf: &mut Vec<u8>) -> std::io::Result<()> {
+        match self.codec {
+            None => {
+                Err(std::io::Error::new(std::io::ErrorKind::Other, "missing or invalid prelude"))
+            }
+            Some(ref mut codec) => codec.encode(msg, buf),
+        }
+    }
 }
 
 #[derive(Clone)]
 struct MemStorage {
     agents: HashMap<String, ast::Glop>,
+    tokens: HashMap<String, Token>,
 }
 
 impl MemStorage {
     #[allow(dead_code)]
     fn new() -> MemStorage {
-        MemStorage { agents: HashMap::new() }
+        MemStorage {
+            agents: HashMap::new(),
+            tokens: HashMap::new(),
+        }
     }
 }
 
-impl Storage for MemStorage {
+impl AgentStorage for MemStorage {
     type RuntimeStorage = runtime::MemStorage;
 
     fn new_state(&self,
@@ -481,10 +558,30 @@ impl Storage for MemStorage {
     }
 }
 
+impl TokenStorage for MemStorage {
+    fn add_token(&mut self, token: Token) -> Result<(), Error> {
+        self.tokens.insert(token.id(), token);
+        Ok(())
+    }
+
+    fn remove_token(&mut self, id: &str) -> Result<(), Error> {
+        self.tokens.remove(id);
+        Ok(())
+    }
+
+    fn token(&self, id: &str) -> Result<Option<Token>, Error> {
+        Ok(match self.tokens.get(id) {
+            Some(token) => Some(token.clone()),
+            None => None,
+        })
+    }
+}
+
 #[derive(Clone)]
 struct DurableStorage {
     path: String,
     agents_path: String,
+    tokens_path: String,
 }
 
 impl DurableStorage {
@@ -500,10 +597,15 @@ impl DurableStorage {
                 .to_str()
                 .unwrap()
                 .to_string(),
+            tokens_path: std::path::PathBuf::from(path)
+                .join("tokens.json")
+                .to_str()
+                .unwrap()
+                .to_string(),
         })
     }
 
-    fn load(&self) -> Result<HashMap<String, ast::Glop>, Error> {
+    fn load_agents(&self) -> Result<HashMap<String, ast::Glop>, Error> {
         if !std::path::PathBuf::from(&self.agents_path).exists() {
             return Ok(HashMap::new());
         }
@@ -515,7 +617,7 @@ impl DurableStorage {
         Ok(agents)
     }
 
-    fn save(&self, agents: HashMap<String, ast::Glop>) -> Result<(), Error> {
+    fn save_agents(&self, agents: HashMap<String, ast::Glop>) -> Result<(), Error> {
         let mut agents_file = std::fs::OpenOptions::new().write(true)
             .mode(0o600)
             .create(true)
@@ -525,9 +627,32 @@ impl DurableStorage {
             .map_err(Error::IO)?;
         Ok(())
     }
+
+    fn load_tokens(&self) -> Result<HashMap<String, Token>, Error> {
+        if !std::path::PathBuf::from(&self.tokens_path).exists() {
+            return Ok(HashMap::new());
+        }
+        let tokens_file = std::fs::OpenOptions::new().read(true)
+            .open(&self.tokens_path)?;
+        let tokens: HashMap<String, Token> =
+            serde_json::from_reader(tokens_file).map_err(to_ioerror)
+                .map_err(Error::IO)?;
+        Ok(tokens)
+    }
+
+    fn save_tokens(&self, tokens: HashMap<String, Token>) -> Result<(), Error> {
+        let mut tokens_file = std::fs::OpenOptions::new().write(true)
+            .mode(0o600)
+            .create(true)
+            .truncate(true)
+            .open(&self.tokens_path)?;
+        serde_json::to_writer(&mut tokens_file, &tokens).map_err(to_ioerror)
+            .map_err(Error::IO)?;
+        Ok(())
+    }
 }
 
-impl Storage for DurableStorage {
+impl AgentStorage for DurableStorage {
     type RuntimeStorage = runtime::DurableStorage;
 
     fn new_state(&self,
@@ -544,33 +669,57 @@ impl Storage for DurableStorage {
     }
 
     fn add_agent(&mut self, name: String, glop: ast::Glop) -> Result<(), Error> {
-        let mut agents = self.load()?;
+        let mut agents = self.load_agents()?;
         agents.insert(name, glop);
-        self.save(agents)?;
+        self.save_agents(agents)?;
         Ok(())
     }
 
     fn remove_agent(&mut self, name: &str) -> Result<(), Error> {
-        let mut agents = self.load()?;
+        let mut agents = self.load_agents()?;
         agents.remove(name);
-        self.save(agents)?;
+        self.save_agents(agents)?;
         Ok(())
     }
 
     fn agents(&self) -> Result<HashMap<String, ast::Glop>, Error> {
-        let agents = self.load()?;
+        let agents = self.load_agents()?;
         Ok(agents)
     }
 }
 
+impl TokenStorage for DurableStorage {
+    fn add_token(&mut self, token: Token) -> Result<(), Error> {
+        let mut tokens = self.load_tokens()?;
+        tokens.insert(token.id(), token);
+        self.save_tokens(tokens)?;
+        Ok(())
+    }
+
+    fn remove_token(&mut self, id: &str) -> Result<(), Error> {
+        let mut tokens = self.load_tokens()?;
+        tokens.remove(id);
+        self.save_tokens(tokens)?;
+        Ok(())
+    }
+
+    fn token(&self, id: &str) -> Result<Option<Token>, Error> {
+        let tokens = self.load_tokens()?;
+        Ok(match tokens.get(id) {
+            Some(token) => Some(token.clone()),
+            None => None,
+        })
+    }
+}
+
 #[derive(Clone)]
-struct SenderOutbox<S: Storage + Send + 'static> {
+struct SenderOutbox<S: AgentStorage + Send + 'static> {
     src: String,
     remote: tokio_core::reactor::Remote,
     state: Arc<Mutex<ServiceState<S>>>,
 }
 
-impl<S: Storage + Send> runtime::Outbox for SenderOutbox<S> {
+impl<S: AgentStorage + Send> runtime::Outbox for SenderOutbox<S> {
     fn send_msg(&self, msg: Message) -> Result<(), Error> {
         let state = self.state.lock().unwrap();
         let sender = match state.outboxes.get(&msg.dst) {
@@ -582,7 +731,7 @@ impl<S: Storage + Send> runtime::Outbox for SenderOutbox<S> {
     }
 }
 
-impl<S: Storage + Send> TokioService for Service<S> {
+impl<S: AgentStorage + Send> TokioService for Service<S> {
     type Request = Request;
     type Response = Response;
 
