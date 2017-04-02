@@ -1,6 +1,9 @@
 extern crate futures;
+extern crate serde_json;
 
 use std;
+use std::collections::HashMap;
+use std::os::unix::fs::OpenOptionsExt;
 
 use self::futures::sync::mpsc;
 
@@ -86,5 +89,135 @@ impl<S: runtime::Storage> futures::stream::Stream for Agent<S> {
         let result = self.poll_matches();
         std::thread::sleep(std::time::Duration::from_millis(100));
         result
+    }
+}
+
+pub trait AgentStorage {
+    type RuntimeStorage: runtime::Storage + Send;
+
+    fn new_state(&self,
+                 name: &str,
+                 outbox: Box<runtime::Outbox + Send + 'static>)
+                 -> Result<runtime::State<Self::RuntimeStorage>, Error>;
+    fn add_agent(&mut self, name: String, glop: ast::Glop) -> Result<(), Error>;
+    fn remove_agent(&mut self, name: &str) -> Result<(), Error>;
+    fn agents(&self) -> Result<HashMap<String, ast::Glop>, Error>;
+}
+
+#[derive(Clone)]
+pub struct MemAgentStorage {
+    agents: HashMap<String, ast::Glop>,
+}
+
+impl MemAgentStorage {
+    #[allow(dead_code)]
+    pub fn new() -> MemAgentStorage {
+        MemAgentStorage { agents: HashMap::new() }
+    }
+}
+
+impl AgentStorage for MemAgentStorage {
+    type RuntimeStorage = runtime::MemStorage;
+
+    fn new_state(&self,
+                 name: &str,
+                 outbox: Box<runtime::Outbox + Send + 'static>)
+                 -> Result<runtime::State<Self::RuntimeStorage>, Error> {
+        Ok(runtime::State::new_outbox(name, Self::RuntimeStorage::new(), outbox))
+    }
+
+    fn add_agent(&mut self, name: String, glop: ast::Glop) -> Result<(), Error> {
+        if self.agents.contains_key(&name) {
+            return Err(Error::AgentExists(name));
+        }
+        self.agents.insert(name, glop);
+        Ok(())
+    }
+
+    fn remove_agent(&mut self, name: &str) -> Result<(), Error> {
+        self.agents.remove(name);
+        Ok(())
+    }
+
+    fn agents(&self) -> Result<HashMap<String, ast::Glop>, Error> {
+        Ok(self.agents.clone())
+    }
+}
+
+#[derive(Clone)]
+pub struct DurableAgentStorage {
+    path: String,
+    agents_json_path: String,
+}
+
+impl DurableAgentStorage {
+    pub fn new(path: &str) -> DurableAgentStorage {
+        DurableAgentStorage {
+            path: path.to_string(),
+            agents_json_path: std::path::PathBuf::from(path)
+                .join("agents.json")
+                .to_str()
+                .unwrap()
+                .to_string(),
+        }
+    }
+
+    fn load_agents(&self) -> Result<HashMap<String, ast::Glop>, Error> {
+        if !std::path::PathBuf::from(&self.agents_json_path).exists() {
+            return Ok(HashMap::new());
+        }
+        let agents_file = std::fs::OpenOptions::new().read(true)
+            .open(&self.agents_json_path)?;
+        let agents: HashMap<String, ast::Glop> =
+            serde_json::from_reader(agents_file).map_err(to_ioerror)
+                .map_err(Error::IO)?;
+        Ok(agents)
+    }
+
+    fn save_agents(&self, agents: HashMap<String, ast::Glop>) -> Result<(), Error> {
+        let mut agents_file = std::fs::OpenOptions::new().write(true)
+            .mode(0o600)
+            .create(true)
+            .truncate(true)
+            .open(&self.agents_json_path)?;
+        serde_json::to_writer(&mut agents_file, &agents).map_err(to_ioerror)
+            .map_err(Error::IO)?;
+        Ok(())
+    }
+}
+
+impl AgentStorage for DurableAgentStorage {
+    type RuntimeStorage = runtime::DurableStorage;
+
+    fn new_state(&self,
+                 name: &str,
+                 outbox: Box<runtime::Outbox + Send + 'static>)
+                 -> Result<runtime::State<Self::RuntimeStorage>, Error> {
+        let runtime_path = std::path::PathBuf::from(&self.path)
+            .join(name)
+            .to_str()
+            .unwrap()
+            .to_string();
+        let runtime_storage = runtime::DurableStorage::new(&runtime_path)?;
+        Ok(runtime::State::new_outbox(name, runtime_storage, outbox))
+    }
+
+    fn add_agent(&mut self, name: String, glop: ast::Glop) -> Result<(), Error> {
+        let mut agents = self.load_agents()?;
+        agents.insert(name, glop);
+        self.save_agents(agents)?;
+        Ok(())
+    }
+
+    fn remove_agent(&mut self, name: &str) -> Result<(), Error> {
+        let mut agents = self.load_agents()?;
+        agents.remove(name);
+        self.save_agents(agents)?;
+        Ok(())
+    }
+
+    fn agents(&self) -> Result<HashMap<String, ast::Glop>, Error> {
+        let agents = self.load_agents()?;
+        Ok(agents)
     }
 }

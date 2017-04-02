@@ -9,10 +9,10 @@ mod agent;
 mod api;
 mod client;
 mod server;
-mod storage;
 mod token;
 
 pub use self::agent::Agent;
 pub use self::api::{AgentRole, Request, Response};
-pub use self::client::ClientProto;
+pub use self::client::Client;
 pub use self::server::Server;
+pub use self::token::{DurableTokenStorage, Token, TokenStorage};

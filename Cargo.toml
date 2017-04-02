@@ -30,6 +30,7 @@ tokio-service = "0.1"
 tokio-proto = "0.1"
 tokio-process = "0.1"
 tokio-signal = "0.1"
+xdg = "^2.1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

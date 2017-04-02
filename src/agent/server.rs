@@ -11,18 +11,20 @@ use std;
 use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::io::Read;
+use std::os::unix::fs::DirBuilderExt;
 use std::sync::{Arc, Mutex};
 
 use self::futures::{Future, Stream, Sink};
 use self::futures::sync::mpsc;
 use self::itertools::Itertools;
+use self::sodiumoxide::crypto::secretbox;
 use self::tokio_core::io::{Codec, Io};
 use self::tokio_service::Service as TokioService;
 
 use super::*;
+use self::agent::{AgentStorage, DurableAgentStorage};
 use self::api::{Request, Response};
-use self::token::{TOKEN_NAME_LEN, TokenStorage};
-use self::storage::{AgentStorage, DurableStorage};
+use self::token::{DurableTokenStorage, TOKEN_NAME_LEN, Token, TokenStorage};
 
 pub struct ServiceCodec;
 
@@ -237,73 +239,6 @@ impl<S: AgentStorage + Send> Service<S> {
     }
 }
 
-pub struct SecureServiceCodec {
-    tokens: Box<TokenStorage + 'static>,
-    codec: Option<crypto::SecretBoxCodec<ServiceCodec>>,
-}
-
-impl SecureServiceCodec {
-    #[allow(dead_code)]
-    pub fn new(tokens: Box<TokenStorage + 'static>) -> SecureServiceCodec {
-        SecureServiceCodec {
-            tokens: tokens,
-            codec: None,
-        }
-    }
-
-    fn decode_prelude(&mut self,
-                      buf: &mut tokio_core::io::EasyBuf)
-                      -> std::io::Result<Option<<ServiceCodec as tokio_core::io::Codec>::In>> {
-        if let Some(i) = buf.as_slice().iter().take(TOKEN_NAME_LEN).position(|&b| b == b'\n') {
-            // remove the serialized frame from the buffer.
-            let line = buf.drain_to(i);
-
-            // Also remove the '\n'
-            buf.drain_to(1);
-
-            let id = std::str::from_utf8(line.as_slice()).map_err(to_ioerror)?;
-            match self.tokens.token(id) {
-                Ok(Some(ref token)) => {
-                    let mut codec = crypto::SecretBoxCodec::new(ServiceCodec, token.key().clone());
-                    let result = codec.decode(buf)?;
-                    self.codec = Some(codec);
-                    Ok(result)
-                }
-                Ok(None) => {
-                    Err(std::io::Error::new(std::io::ErrorKind::Other,
-                                            format!("missing or invalid token name: {}", id)))
-                }
-                Err(e) => Err(to_ioerror(e)),
-            }
-        } else if buf.len() >= TOKEN_NAME_LEN {
-            Err(std::io::Error::new(std::io::ErrorKind::Other, "missing or invalid prelude"))
-        } else {
-            Ok(None)
-        }
-    }
-}
-
-impl tokio_core::io::Codec for SecureServiceCodec {
-    type In = <ServiceCodec as tokio_core::io::Codec>::In;
-    type Out = <ServiceCodec as tokio_core::io::Codec>::Out;
-
-    fn decode(&mut self, buf: &mut tokio_core::io::EasyBuf) -> std::io::Result<Option<Self::In>> {
-        match self.codec {
-            Some(ref mut codec) => codec.decode(buf),
-            None => self.decode_prelude(buf),
-        }
-    }
-
-    fn encode(&mut self, msg: Self::Out, buf: &mut Vec<u8>) -> std::io::Result<()> {
-        match self.codec {
-            None => {
-                Err(std::io::Error::new(std::io::ErrorKind::Other, "missing or invalid prelude"))
-            }
-            Some(ref mut codec) => codec.encode(msg, buf),
-        }
-    }
-}
-
 #[derive(Clone)]
 struct SenderOutbox<S: AgentStorage + Send + 'static> {
     src: String,
@@ -341,17 +276,108 @@ impl<S: AgentStorage + Send> TokioService for Service<S> {
     }
 }
 
+pub struct SecureServiceCodec {
+    tokens: Box<TokenStorage>,
+    codec: Option<crypto::SecretBoxCodec<ServiceCodec>>,
+}
+
+impl SecureServiceCodec {
+    #[allow(dead_code)]
+    pub fn new(tokens: Box<TokenStorage>) -> SecureServiceCodec {
+        SecureServiceCodec {
+            tokens: tokens,
+            codec: None,
+        }
+    }
+
+    fn decode_prelude(&mut self,
+                      buf: &mut tokio_core::io::EasyBuf)
+                      -> std::io::Result<Option<crypto::SecretBoxCodec<ServiceCodec>>> {
+        if let Some(i) = buf.as_slice().iter().position(|&b| b == b'\0') {
+            // remove the serialized frame from the buffer.
+            let line = buf.drain_to(i);
+
+            // Also remove the '\0'
+            buf.drain_to(1);
+
+            let id = std::str::from_utf8(line.as_slice()).map_err(to_ioerror)?;
+            trace!("matched prelude, connection from {}", id);
+            match self.tokens.token(id) {
+                Ok(Some(ref token)) => {
+                    Ok(Some(crypto::SecretBoxCodec::new(ServiceCodec, token.key().clone())))
+                }
+                Ok(None) => {
+                    Err(std::io::Error::new(std::io::ErrorKind::Other,
+                                            format!("missing or invalid token name: {}", id)))
+                }
+                Err(e) => Err(to_ioerror(e)),
+            }
+        } else if buf.len() >= TOKEN_NAME_LEN {
+            Err(std::io::Error::new(std::io::ErrorKind::Other, "missing or invalid prelude"))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+impl tokio_core::io::Codec for SecureServiceCodec {
+    type In = <ServiceCodec as tokio_core::io::Codec>::In;
+    type Out = <ServiceCodec as tokio_core::io::Codec>::Out;
+
+    fn decode(&mut self, buf: &mut tokio_core::io::EasyBuf) -> std::io::Result<Option<Self::In>> {
+        match self.decode_prelude(buf) {
+            Ok(Some(codec)) => self.codec = Some(codec),
+            Ok(None) => {}
+            Err(e) => return Err(e),
+        }
+        if let Some(ref mut codec) = self.codec {
+            trace!("decoding encrypted contents");
+            codec.decode(buf)
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn encode(&mut self, msg: Self::Out, buf: &mut Vec<u8>) -> std::io::Result<()> {
+        match self.codec {
+            None => {
+                Err(std::io::Error::new(std::io::ErrorKind::Other, "missing or invalid prelude"))
+            }
+            Some(ref mut codec) => codec.encode(msg, buf),
+        }
+    }
+}
+
 pub struct Server {
-    addr: std::net::SocketAddr,
-    path: String,
+    pub addr: std::net::SocketAddr,
+    pub tokens_path: String,
+    pub agents_path: String,
 }
 
 impl Server {
-    pub fn new(addr: std::net::SocketAddr, path: &str) -> Server {
-        Server {
+    pub fn new(addr_str: &str, path: &str) -> Result<Server, Error> {
+        let addr = addr_str.parse()?;
+        Server::new_addr(addr, path)
+    }
+
+    pub fn new_addr(addr: std::net::SocketAddr, path: &str) -> Result<Server, Error> {
+        std::fs::DirBuilder::new().recursive(true)
+            .mode(0o700)
+            .create(path)
+            .map_err(Error::IO)?;
+        Ok(Server {
             addr: addr,
-            path: path.to_string(),
-        }
+            agents_path: std::path::PathBuf::from(path)
+                .join("agents")
+                .to_str()
+                .unwrap()
+                .to_string(),
+            tokens_path: std::path::PathBuf::from(path)
+                .join("tokens.json")
+                .to_str()
+                .unwrap()
+                .to_string(),
+        })
     }
 
     pub fn run(&self) -> Result<(), Error> {
@@ -360,10 +386,11 @@ impl Server {
         let listener = tokio_core::net::TcpListener::bind(&self.addr, &handle).map_err(Error::IO)?;
         info!("server listening on {}", self.addr);
         let connections = listener.incoming();
-        let svc_storage = DurableStorage::new(&self.path)?;
-        let service = Service::new(svc_storage, &handle)?;
+        let agent_storage = DurableAgentStorage::new(&self.agents_path);
+        let service = Service::new(agent_storage, &handle)?;
         let server = connections.for_each(move |(socket, _peer_addr)| {
-            let (wr, rd) = socket.framed(ServiceCodec).split();
+            let token_storage = DurableTokenStorage::new(&self.tokens_path);
+            let (wr, rd) = socket.framed(SecureServiceCodec::new(Box::new(token_storage))).split();
             let service = service.clone();
             let responses = rd.and_then(move |req| service.call(req));
             let responder = wr.send_all(responses)
