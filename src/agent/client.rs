@@ -169,27 +169,27 @@ impl Client {
         }
     }
 
-    pub fn add_remote(&mut self,
-                      name: &str,
-                      addr_str: &str,
-                      encoded_key: &str)
-                      -> Result<(Remote, Token), Error> {
+    pub fn add_remote_str(&mut self,
+                          name: &str,
+                          addr_str: &str,
+                          id: &str,
+                          encoded_key: &str)
+                          -> Result<(Remote, Token), Error> {
         let addr = addr_str.parse().map_err(Error::AddrParse)?;
         let key_bytes = base64::decode(encoded_key).map_err(to_ioerror)?;
         let key = match secretbox::Key::from_slice(&key_bytes) {
             Some(k) => k,
             None => return Err(Error::InvalidArgument("invalid token length".to_string())),
         };
-        let id = textnonce::TextNonce::sized_urlsafe(32).unwrap().into_string();
-        self.add_remote_token(name, addr, &id, key)
+        self.add_remote(name, addr, id, key)
     }
 
-    pub fn add_remote_token(&mut self,
-                            name: &str,
-                            addr: std::net::SocketAddr,
-                            id: &str,
-                            key: secretbox::Key)
-                            -> Result<(Remote, Token), Error> {
+    pub fn add_remote(&mut self,
+                      name: &str,
+                      addr: std::net::SocketAddr,
+                      id: &str,
+                      key: secretbox::Key)
+                      -> Result<(Remote, Token), Error> {
         let token = Token::Admin {
             id: id.to_string(),
             key: key,

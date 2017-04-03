@@ -1,6 +1,7 @@
 #[macro_use]
 extern crate log;
 
+extern crate base64;
 extern crate clap;
 extern crate env_logger;
 extern crate futures;
@@ -46,6 +47,16 @@ fn main() {
         .subcommand(SubCommand::with_name("server")
             .about("agent server")
             .subcommand(SubCommand::with_name("init").about("initialize a local agent server"))
+            .subcommand(SubCommand::with_name("token")
+                .about("manage server tokens")
+                .subcommand(SubCommand::with_name("add")
+                    .about("add a server token")
+                    .arg(Arg::with_name("TOKEN_ID").long("token-id"))
+                    .arg(Arg::with_name("NAME").index(1).required(true)))
+                .subcommand(SubCommand::with_name("remove")
+                    .about("remove a server token")
+                    .arg(Arg::with_name("NAME").index(1).required(true)))
+                .subcommand(SubCommand::with_name("list").about("list server tokens")))
             .subcommand(SubCommand::with_name("run")
                 .arg(Arg::with_name("ADDR")
                     .short("a")
@@ -124,6 +135,27 @@ fn main() {
                 let sub_m = app_m.subcommand_matches("server").unwrap();
                 match sub_m.subcommand_name() {
                     Some("init") => cmd_server_init(sub_m.subcommand_matches("init").unwrap()),
+                    Some("token") => {
+                        let sub_m = sub_m.subcommand_matches("token").unwrap();
+                        match sub_m.subcommand_name() {
+                            Some("add") => {
+                                cmd_server_token_add(sub_m.subcommand_matches("add").unwrap())
+                            }
+                            Some("remove") => {
+                                cmd_server_token_remove(sub_m.subcommand_matches("remove").unwrap())
+                            }
+                            Some("list") => {
+                                cmd_server_token_list(sub_m.subcommand_matches("list").unwrap())
+                            }
+                            Some(subcmd) => {
+                                error!("unsupported command {}", subcmd);
+                                Err(Error::CLI(clap::Error::with_description("unsupported command",
+                                                             clap::ErrorKind::HelpDisplayed)))
+                            }
+                            None => Err(Error::CLI(clap::Error::with_description("missing subcommand",
+                                                         clap::ErrorKind::HelpDisplayed))),
+                        }
+                    }
                     Some("run") => cmd_server_run(sub_m.subcommand_matches("run").unwrap()),
                     Some(subcmd) => {
                         error!("unsupported command {}", subcmd);
@@ -246,8 +278,41 @@ fn cmd_server_init<'a>(_app_m: &ArgMatches<'a>) -> AppResult<()> {
 
     let key = secretbox::gen_key();
     let id = textnonce::TextNonce::sized_urlsafe(32).unwrap().into_string();
-    client.add_remote_token("local", server.addr, &id, key.clone())?;
+    client.add_remote("local", server.addr, &id, key.clone())?;
     server_token_st.add_token(agent::Token::Admin { id: id, key: key })?;
+    Ok(())
+}
+
+fn cmd_server_token_add<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
+    let server_home = server_home().map_err(Error::IO)?;
+    let server = agent::Server::new("127.0.0.1:6709", &server_home)?;
+    let mut server_token_st = agent::DurableTokenStorage::new(&server.tokens_path);
+    let id = app_m.value_of("NAME").unwrap();
+    let key = secretbox::gen_key();
+    server_token_st.add_token(agent::Token::Admin {
+            id: id.to_string(),
+            key: key.clone(),
+        })?;
+    println!("{}", base64::encode(&key.0));
+    Ok(())
+}
+
+fn cmd_server_token_remove<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
+    let server_home = server_home().map_err(Error::IO)?;
+    let server = agent::Server::new("127.0.0.1:6709", &server_home)?;
+    let mut server_token_st = agent::DurableTokenStorage::new(&server.tokens_path);
+    server_token_st.remove_token(app_m.value_of("NAME").unwrap())?;
+    Ok(())
+}
+
+fn cmd_server_token_list<'a>(_app_m: &ArgMatches<'a>) -> AppResult<()> {
+    let server_home = server_home().map_err(Error::IO)?;
+    let server = agent::Server::new("127.0.0.1:6709", &server_home)?;
+    let server_token_st = agent::DurableTokenStorage::new(&server.tokens_path);
+    let token_names = server_token_st.token_names()?;
+    for token_name in token_names {
+        println!("{}", token_name);
+    }
     Ok(())
 }
 
@@ -462,9 +527,14 @@ fn cmd_introduce<'a>(app_m: &ArgMatches<'a>, sub_m: &ArgMatches<'a>) -> AppResul
 fn cmd_remote_add<'a>(sub_m: &ArgMatches<'a>) -> AppResult<()> {
     let client_home = client_home()?;
     let mut client = agent::Client::new(&client_home)?;
-    client.add_remote(sub_m.value_of("NAME").unwrap(),
-                    sub_m.value_of("ADDR").unwrap(),
-                    sub_m.value_of("TOKEN").unwrap())?;
+    let id = match sub_m.value_of("TOKEN_ID") {
+        Some(ref token_id) => token_id,
+        None => sub_m.value_of("NAME").unwrap(),
+    };
+    client.add_remote_str(sub_m.value_of("NAME").unwrap(),
+                        sub_m.value_of("ADDR").unwrap(),
+                        id,
+                        sub_m.value_of("TOKEN").unwrap())?;
     Ok(())
 }
 

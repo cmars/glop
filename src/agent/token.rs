@@ -41,6 +41,7 @@ pub trait TokenStorage {
     fn add_token(&mut self, token: Token) -> Result<(), Error>;
     fn remove_token(&mut self, id: &str) -> Result<(), Error>;
     fn token(&self, id: &str) -> Result<Option<Token>, Error>;
+    fn token_names(&self) -> Result<Vec<String>, Error>;
 }
 
 #[derive(Clone)]
@@ -71,6 +72,10 @@ impl TokenStorage for MemTokenStorage {
             Some(token) => Some(token.clone()),
             None => None,
         })
+    }
+
+    fn token_names(&self) -> Result<Vec<String>, Error> {
+        Ok(self.tokens.keys().cloned().collect())
     }
 }
 
@@ -129,5 +134,10 @@ impl TokenStorage for DurableTokenStorage {
             Some(token) => Some(token.clone()),
             None => None,
         })
+    }
+
+    fn token_names(&self) -> Result<Vec<String>, Error> {
+        let tokens = self.load_tokens()?;
+        Ok(tokens.keys().cloned().collect())
     }
 }

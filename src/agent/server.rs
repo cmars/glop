@@ -9,7 +9,6 @@ extern crate tokio_service;
 use std;
 use std::collections::HashMap;
 use std::error::Error as StdError;
-use std::io::Read;
 use std::os::unix::fs::DirBuilderExt;
 use std::sync::{Arc, Mutex};
 
