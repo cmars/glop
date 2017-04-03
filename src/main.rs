@@ -371,9 +371,10 @@ fn cmd_getmsg<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
 fn cmd_add<'a>(app_m: &ArgMatches<'a>, sub_m: &ArgMatches<'a>) -> AppResult<()> {
     let client_home = client_home()?;
     let client = agent::Client::new(&client_home)?;
+    let contents = read_file(sub_m.value_of("SOURCE").unwrap())?;
     let resp = client.call(app_m.value_of("REMOTE").unwrap(),
               agent::Request::Add {
-                  source: sub_m.value_of("SOURCE").unwrap().to_string(),
+                  contents: contents,
                   name: sub_m.value_of("NAME").unwrap().to_string(),
               })?;
     match resp {

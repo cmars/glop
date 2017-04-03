@@ -72,13 +72,6 @@ impl tokio_core::io::Codec for ServiceCodec {
     }
 }
 
-fn read_file(path: &str) -> Result<String, Error> {
-    let mut f = std::fs::File::open(path)?;
-    let mut s = String::new();
-    f.read_to_string(&mut s).map_err(Error::IO)?;
-    Ok(s)
-}
-
 type AgentOutboxMap = HashMap<String, mpsc::Sender<Message>>;
 
 struct ServiceState<S: AgentStorage + Send + 'static> {
@@ -134,13 +127,12 @@ impl<S: AgentStorage + Send> Service<S> {
         Ok(svc)
     }
 
-    fn add_agent_source(&self,
-                        name: &str,
-                        source: &str,
-                        state: &mut ServiceState<S>)
-                        -> Result<(), Error> {
-        let glop_contents = read_file(source)?;
-        let glop = grammar::glop(&glop_contents).map_err(Error::Parse)?;
+    fn add_agent_contents(&self,
+                          name: &str,
+                          contents: &str,
+                          state: &mut ServiceState<S>)
+                          -> Result<(), Error> {
+        let glop = grammar::glop(contents).map_err(Error::Parse)?;
         self.add_agent(name, glop, state)
     }
 
@@ -182,11 +174,11 @@ impl<S: AgentStorage + Send> Service<S> {
         let mut state = self.state.lock().unwrap();
         debug!("request {:?}", &req);
         let res = match req {
-            Request::Add { source: ref add_source, name: ref add_name } => {
+            Request::Add { contents: ref add_contents, name: ref add_name } => {
                 if state.has_agent(add_name) {
                     return Ok(Response::Error(format!("agent {} already added", add_name)));
                 }
-                self.add_agent_source(add_name, add_source, &mut state)?;
+                self.add_agent_contents(add_name, add_contents, &mut state)?;
                 Response::Add
             }
             Request::Remove { ref name } => {

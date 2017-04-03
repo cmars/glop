@@ -3,7 +3,7 @@ use super::*;
 #[derive(Serialize, Deserialize)]
 #[derive(Debug)]
 pub enum Request {
-    Add { source: String, name: String },
+    Add { contents: String, name: String },
     Remove { name: String },
     List,
     SendTo(Message),
