@@ -2,7 +2,6 @@ extern crate futures;
 extern crate futures_cpupool;
 extern crate itertools;
 extern crate serde_json;
-extern crate sodiumoxide;
 extern crate tokio_core;
 extern crate tokio_proto;
 extern crate tokio_service;
@@ -17,14 +16,13 @@ use std::sync::{Arc, Mutex};
 use self::futures::{Future, Stream, Sink};
 use self::futures::sync::mpsc;
 use self::itertools::Itertools;
-use self::sodiumoxide::crypto::secretbox;
-use self::tokio_core::io::{Codec, Io};
+use self::tokio_core::io::Io;
 use self::tokio_service::Service as TokioService;
 
 use super::*;
 use self::agent::{AgentStorage, DurableAgentStorage};
 use self::api::{Request, Response};
-use self::token::{DurableTokenStorage, TOKEN_NAME_LEN, Token, TokenStorage};
+use self::token::{DurableTokenStorage, TOKEN_NAME_LEN, TokenStorage};
 
 pub struct ServiceCodec;
 

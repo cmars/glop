@@ -5,7 +5,6 @@ extern crate clap;
 extern crate env_logger;
 extern crate futures;
 extern crate sodiumoxide;
-extern crate serde_json;
 extern crate textnonce;
 extern crate tokio_core;
 extern crate tokio_proto;
@@ -85,8 +84,17 @@ fn main() {
                 .arg(Arg::with_name("SRC_TOPIC").index(1).required(true))
                 .arg(Arg::with_name("TOPIC").index(2).required(true))
                 .arg(Arg::with_name("CONTENTS").index(3).multiple(true).required(false))))
+        .subcommand(SubCommand::with_name("remote")
+            .about("manage remote agent servers")
+            .subcommand(SubCommand::with_name("add")
+                .arg(Arg::with_name("NAME").index(1).required(true))
+                .arg(Arg::with_name("ADDR").index(2).required(true))
+                .arg(Arg::with_name("TOKEN").index(3).required(true)))
+            .subcommand(SubCommand::with_name("remove")
+                .arg(Arg::with_name("NAME").index(1).required(true)))
+            .subcommand(SubCommand::with_name("list")))
         .subcommand(SubCommand::with_name("agent")
-            .about("manage the agent server")
+            .about("operate an agent server")
             .arg(Arg::with_name("REMOTE")
                 .short("r")
                 .long("remote")
@@ -117,6 +125,23 @@ fn main() {
                 match sub_m.subcommand_name() {
                     Some("init") => cmd_server_init(sub_m.subcommand_matches("init").unwrap()),
                     Some("run") => cmd_server_run(sub_m.subcommand_matches("run").unwrap()),
+                    Some(subcmd) => {
+                        error!("unsupported command {}", subcmd);
+                        Err(Error::CLI(clap::Error::with_description("unsupported command",
+                                                             clap::ErrorKind::HelpDisplayed)))
+                    }
+                    None => Err(Error::CLI(clap::Error::with_description("missing subcommand",
+                                                         clap::ErrorKind::HelpDisplayed))),
+                }
+            }
+            Some("remote") => {
+                let sub_m = app_m.subcommand_matches("remote").unwrap();
+                match sub_m.subcommand_name() {
+                    Some("add") => cmd_remote_add(sub_m.subcommand_matches("add").unwrap()),
+                    Some("remove") => {
+                        cmd_remote_remove(sub_m.subcommand_matches("remove").unwrap())
+                    }
+                    Some("list") => cmd_remote_list(sub_m.subcommand_matches("list").unwrap()),
                     Some(subcmd) => {
                         error!("unsupported command {}", subcmd);
                         Err(Error::CLI(clap::Error::with_description("unsupported command",
@@ -211,7 +236,7 @@ fn read_file(path: &str) -> AppResult<String> {
     Ok(s)
 }
 
-fn cmd_server_init<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
+fn cmd_server_init<'a>(_app_m: &ArgMatches<'a>) -> AppResult<()> {
     let client_home = client_home().map_err(Error::IO)?;
     let server_home = server_home().map_err(Error::IO)?;
 
@@ -221,7 +246,7 @@ fn cmd_server_init<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
 
     let key = secretbox::gen_key();
     let id = textnonce::TextNonce::sized_urlsafe(32).unwrap().into_string();
-    let (remote, token) = client.add_remote_token("local", server.addr, &id, key.clone())?;
+    client.add_remote_token("local", server.addr, &id, key.clone())?;
     server_token_st.add_token(agent::Token::Admin { id: id, key: key })?;
     Ok(())
 }
@@ -431,6 +456,32 @@ fn cmd_introduce<'a>(app_m: &ArgMatches<'a>, sub_m: &ArgMatches<'a>) -> AppResul
         agent::Response::Error(msg) => Err(Error::ErrorResponse(msg)),
         _ => Err(Error::BadResponse),
     }
+}
+
+fn cmd_remote_add<'a>(sub_m: &ArgMatches<'a>) -> AppResult<()> {
+    let client_home = client_home()?;
+    let mut client = agent::Client::new(&client_home)?;
+    client.add_remote(sub_m.value_of("NAME").unwrap(),
+                    sub_m.value_of("ADDR").unwrap(),
+                    sub_m.value_of("TOKEN").unwrap())?;
+    Ok(())
+}
+
+fn cmd_remote_remove<'a>(sub_m: &ArgMatches<'a>) -> AppResult<()> {
+    let client_home = client_home()?;
+    let mut client = agent::Client::new(&client_home)?;
+    client.remove_remote(sub_m.value_of("NAME").unwrap())?;
+    Ok(())
+}
+
+fn cmd_remote_list<'a>(_sub_m: &ArgMatches<'a>) -> AppResult<()> {
+    let client_home = client_home()?;
+    let client = agent::Client::new(&client_home)?;
+    let remotes = client.remotes()?;
+    for r in remotes {
+        println!("{}\t{}", r.name, r.addr)
+    }
+    Ok(())
 }
 
 fn cmd_send_script<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {

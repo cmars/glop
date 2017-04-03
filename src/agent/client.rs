@@ -216,6 +216,11 @@ impl Client {
         }
     }
 
+    pub fn remotes(&self) -> Result<Vec<Remote>, Error> {
+        let remotes = self.remotes.load_remotes()?;
+        Ok(remotes.values().cloned().collect())
+    }
+
     fn remote(&self, name: &str) -> Result<Option<(Remote, Token)>, Error> {
         match self.remotes.remote(name) {
             Ok(Some(ref remote)) => {
@@ -234,9 +239,9 @@ impl Client {
 #[derive(Serialize, Deserialize)]
 #[derive(Clone)]
 pub struct Remote {
-    name: String,
-    token_id: String,
-    addr: std::net::SocketAddr,
+    pub name: String,
+    pub token_id: String,
+    pub addr: std::net::SocketAddr,
 }
 
 pub struct RemotesStorage {
