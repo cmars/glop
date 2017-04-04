@@ -1,20 +1,16 @@
 name: glop
-version: '0.1'
+version: '0.2'
 summary: Glue Language for OPerations
 description: |
   A DSL and interpreted runtime for building autonomous, intelligent agents
   that operate software systems.
 
 grade: stable
-confinement: strict
+confinement: classic
 
 apps:
   glop:
     command: glop-wrapper
-    plugs:
-      - network
-      - network-bind
-      - home
 
 parts:
   glop:
@@ -26,4 +22,3 @@ parts:
     source: .
     snap:
       - glop-wrapper
-
