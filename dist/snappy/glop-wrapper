@@ -4,5 +4,6 @@ set -e
 
 export PATH=${SNAP}/bin:$PATH
 export HOME=${SNAP_USER_DATA}
+export RUST_LOG=glop=info
 
 exec ${SNAP}/bin/glop $@
