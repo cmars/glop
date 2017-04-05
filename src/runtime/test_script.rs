@@ -9,6 +9,8 @@ const SIMPLE_SCRIPT_OK: &'static str = r###"
 when (message init) {
     script #!/bin/bash
 set -ex
+[ -n "$GLOP_WORKSPACE" ]
+[ "$GLOP_WORKSPACE" = "$(pwd)" ]
 echo "hello world"
 !#
 }

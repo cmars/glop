@@ -21,6 +21,8 @@ pub trait Storage {
 
     fn vars(&self) -> &HashMap<String, Value>;
     fn seq(&self) -> i32;
+
+    fn workspace(&self) -> &str;
 }
 
 pub trait Outbox {
@@ -66,7 +68,7 @@ impl<S: Storage> State<S> {
         debug!("State.eval: {:?}", &m);
         let (seq, vars) = self.storage.load()?;
         let msgs = self.storage.next_messages(&m.filters())?;
-        let ctx = Context::new(&self.src, vars, msgs);
+        let ctx = Context::new(&self.src, vars, msgs, self.storage.workspace());
         let txn = Transaction::new(m, seq, ctx);
         if txn.eval() {
             debug!("State.eval: MATCHED");
@@ -152,6 +154,7 @@ pub struct MemStorage {
     seq: i32,
     vars: HashMap<String, Value>,
     msgs: HashMap<MessageFilter, Vec<Message>>,
+    workspace: String,
 }
 
 impl MemStorage {
@@ -160,6 +163,7 @@ impl MemStorage {
             seq: 0,
             vars: HashMap::new(),
             msgs: HashMap::new(),
+            workspace: std::env::current_dir().unwrap().to_str().unwrap().to_string(),
         }
     }
 }
@@ -217,6 +221,10 @@ impl Storage for MemStorage {
     fn seq(&self) -> i32 {
         self.seq
     }
+
+    fn workspace(&self) -> &str {
+        &self.workspace
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -231,6 +239,7 @@ pub struct DurableStorage {
     checkpoint: DurableCheckpoint,
     topics_path: String,
     topics: HashMap<String, spoolq::Queue<Message>>,
+    workspace: String,
 }
 
 impl DurableStorage {
@@ -243,6 +252,12 @@ impl DurableStorage {
             .mode(0o700)
             .create(&topics_path)
             .map_err(error::Error::IO)?;
+        let workspace =
+            std::path::PathBuf::from(path).join("workspace").to_str().unwrap().to_string();
+        std::fs::DirBuilder::new().recursive(true)
+            .mode(0o700)
+            .create(&workspace)
+            .map_err(error::Error::IO)?;
         DurableStorage::recover_all(&topics_path)?;
         Ok(DurableStorage {
             checkpoint: DurableCheckpoint {
@@ -252,6 +267,7 @@ impl DurableStorage {
             checkpoint_path: checkpoint_path,
             topics: HashMap::new(),
             topics_path: topics_path,
+            workspace: workspace,
         })
     }
 
@@ -376,6 +392,10 @@ impl Storage for DurableStorage {
 
     fn seq(&self) -> i32 {
         self.checkpoint.seq
+    }
+
+    fn workspace(&self) -> &str {
+        &self.workspace
     }
 }
 

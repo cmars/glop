@@ -9,14 +9,20 @@ pub struct Context {
     pub vars: HashMap<String, Value>,
     pub msgs: HashMap<String, Message>,
     pub src: String,
+    pub workspace: String,
 }
 
 impl Context {
-    pub fn new(src: &str, vars: HashMap<String, Value>, msgs: HashMap<String, Message>) -> Context {
+    pub fn new(src: &str,
+               vars: HashMap<String, Value>,
+               msgs: HashMap<String, Message>,
+               workspace: &str)
+               -> Context {
         Context {
             vars: vars,
             msgs: msgs,
             src: src.to_string(),
+            workspace: workspace.to_string(),
         }
     }
 
@@ -35,6 +41,8 @@ impl Context {
         let mut new_path = std::env::split_paths(&path).collect::<Vec<_>>();
         new_path.insert(0, exec_dir.to_path_buf());
         cmd.env("PATH", std::env::join_paths(new_path).unwrap());
+        cmd.env("GLOP_WORKSPACE", &self.workspace);
+        cmd.current_dir(&self.workspace);
     }
 
     pub fn get_msg<'a>(&'a mut self, topic: &str, key: &Identifier) -> Option<&'a Value> {
