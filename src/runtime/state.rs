@@ -100,13 +100,10 @@ impl<S: Storage> State<S> {
                     k.unset(&mut vars);
                 }
                 &Action::SendMsg { ref dst, ref topic, ref contents } => {
-                    let msg = Message {
-                        src: self.src.to_string(),
-                        src_role: txn.m.acting_role.clone(),
-                        dst: dst.to_string(),
-                        topic: topic.to_string(),
-                        contents: contents.clone(),
-                    };
+                    let msg = Message::new(topic, contents.clone())
+                        .src(&self.src)
+                        .src_role(txn.m.acting_role.clone())
+                        .dst(dst);
                     debug!("send {:?}", msg);
                     if dst == "self" {
                         self_msgs.push(msg);

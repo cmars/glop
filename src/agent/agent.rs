@@ -25,14 +25,7 @@ impl<S: runtime::Storage> Agent<S> {
         let mut st = st;
         let (seq, _) = st.mut_storage().load()?;
         if seq == 0 {
-            st.mut_storage()
-                .push_msg(Message {
-                    src: "".to_string(),
-                    src_role: None,
-                    topic: "init".to_string(),
-                    dst: name,
-                    contents: Obj::new(),
-                })?;
+            st.mut_storage().push_msg(Message::new("init", Obj::new()))?;
         }
         let m_excs = glop.matches
             .iter()

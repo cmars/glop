@@ -64,13 +64,10 @@ cargo run var set all good
 "###;
 
 fn test_msg(topic: &str, contents: Obj) -> Message {
-    Message {
-        src: "".to_string(),
-        src_role: None,
-        dst: "test".to_string(),
-        topic: topic.to_string(),
-        contents: contents,
-    }
+    Message::new(topic, contents)
+        .src("")
+        .src_role(None)
+        .dst("test")
 }
 
 fn parse_one_match(s: &str) -> ast::Match {

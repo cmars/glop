@@ -35,13 +35,10 @@ const NESTED_TWO_MSGS: &'static str = r#"when (message foo) {
 }"#;
 
 fn test_msg(topic: &str, contents: Obj) -> Message {
-    Message {
-        src: "".to_string(),
-        src_role: None,
-        dst: "test".to_string(),
-        topic: topic.to_string(),
-        contents: contents,
-    }
+    Message::new(topic, contents)
+        .src("")
+        .src_role(None)
+        .dst("test")
 }
 
 fn setup() {

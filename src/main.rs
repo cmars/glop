@@ -329,13 +329,10 @@ fn cmd_run<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let glop = grammar::glop(&glop_contents).map_err(Error::Parse)?;
     let mut st = runtime::State::new("main", runtime::MemStorage::new());
     st.mut_storage()
-        .push_msg(value::Message {
-            src: "".to_string(),
-            src_role: None,
-            dst: "main".to_string(),
-            topic: "init".to_string(),
-            contents: value::Obj::new(),
-        })?;
+        .push_msg(value::Message::new("init", value::Obj::new())
+            .src("")
+            .src_role(None)
+            .dst("main"))?;
     let m_excs =
         glop.matches.iter().map(|m_ast| runtime::Match::new_from_ast(&m_ast)).collect::<Vec<_>>();
     loop {
@@ -482,21 +479,19 @@ fn cmd_send_agent<'a>(app_m: &ArgMatches<'a>, sub_m: &ArgMatches<'a>) -> AppResu
     let client = agent::Client::new(&client_home)?;
     let contents = kv_map(sub_m.values_of("CONTENTS"));
     let resp = client.call(app_m.value_of("REMOTE").unwrap(),
-              agent::Request::SendTo(value::Message {
-                  src: if let Some(ref src) = sub_m.value_of("SOURCE") {
-                      src.to_string()
+              agent::Request::SendTo(value::Message::new(sub_m.value_of("TOPIC").unwrap(),
+                                                         value::Value::from_flat_map(contents))
+                  .src(if let Some(ref src) = sub_m.value_of("SOURCE") {
+                      src
                   } else {
-                      "user".to_string()
-                  },
-                  src_role: if let Some(ref role) = sub_m.value_of("ROLE") {
+                      "user"
+                  })
+                  .src_role(if let Some(ref role) = sub_m.value_of("ROLE") {
                       Some(role.to_string())
                   } else {
                       None
-                  },
-                  dst: sub_m.value_of("NAME").unwrap().to_string(),
-                  topic: sub_m.value_of("TOPIC").unwrap().to_string(),
-                  contents: value::Value::from_flat_map(contents),
-              }))?;
+                  })
+                  .dst(sub_m.value_of("NAME").unwrap())))?;
     match resp {
         agent::Response::SendTo { src: _, dst: _ } => Ok(()),
         agent::Response::Error(msg) => Err(Error::ErrorResponse(msg)),

@@ -1,3 +1,5 @@
+extern crate textnonce;
+
 use std::collections::HashMap;
 
 use super::ast;
@@ -91,11 +93,40 @@ pub type Obj = HashMap<String, Value>;
 #[derive(Serialize, Deserialize)]
 #[derive(Clone, Debug)]
 pub struct Message {
+    pub id: String,
     pub src: String,
     pub src_role: Option<String>,
     pub dst: String,
     pub topic: String,
     pub contents: Obj,
+}
+
+impl Message {
+    pub fn new(topic: &str, contents: Obj) -> Message {
+        Message {
+            id: textnonce::TextNonce::sized_urlsafe(32).unwrap().into_string(),
+            src: "".to_string(),
+            src_role: None,
+            dst: "".to_string(),
+            topic: topic.to_string(),
+            contents: contents,
+        }
+    }
+
+    pub fn src(mut self, src: &str) -> Message {
+        self.src = src.to_string();
+        self
+    }
+
+    pub fn src_role(mut self, src_role: Option<String>) -> Message {
+        self.src_role = src_role.clone();
+        self
+    }
+
+    pub fn dst(mut self, dst: &str) -> Message {
+        self.dst = dst.to_string();
+        self
+    }
 }
 
 pub type Env = HashMap<String, String>;

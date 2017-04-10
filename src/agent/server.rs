@@ -190,21 +190,15 @@ impl<S: AgentStorage + Send> Service<S> {
                 let mut result = vec![];
                 for ref p in agent_roles.iter().combinations(2) {
                     result.push(self.send_to(&state,
-                                             Message {
-                                                 src: p[0].name.to_string(),
-                                                 src_role: Some(p[0].role.to_string()),
-                                                 dst: p[1].name.to_string(),
-                                                 topic: "intro".to_string(),
-                                                 contents: Obj::new(),
-                                             }));
+                                             Message::new("intro", Obj::new())
+                                                 .src(&p[0].name)
+                                                 .src_role(Some(p[0].role.to_string()))
+                                                 .dst(&p[1].name)));
                     result.push(self.send_to(&state,
-                                             Message {
-                                                 src: p[1].name.to_string(),
-                                                 src_role: Some(p[1].role.to_string()),
-                                                 dst: p[0].name.to_string(),
-                                                 topic: "intro".to_string(),
-                                                 contents: Obj::new(),
-                                             }));
+                                             Message::new("intro", Obj::new())
+                                                 .src(&p[1].name)
+                                                 .src_role(Some(p[1].role.to_string()))
+                                                 .dst(&p[0].name)));
                 }
                 Response::Introduce(result)
             }
