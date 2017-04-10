@@ -210,6 +210,7 @@ impl<S: AgentStorage + Send> Service<S> {
     fn send_to(&self, state: &ServiceState<S>, msg: Message) -> Response {
         if let Some(sender) = state.outboxes.get(&msg.dst) {
             let resp = Response::SendTo {
+                id: msg.id.to_string(),
                 src: msg.src.to_string(),
                 dst: msg.dst.to_string(),
             };

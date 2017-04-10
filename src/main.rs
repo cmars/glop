@@ -493,7 +493,7 @@ fn cmd_send_agent<'a>(app_m: &ArgMatches<'a>, sub_m: &ArgMatches<'a>) -> AppResu
                   })
                   .dst(sub_m.value_of("NAME").unwrap())))?;
     match resp {
-        agent::Response::SendTo { src: _, dst: _ } => Ok(()),
+        agent::Response::SendTo { id: _, src: _, dst: _ } => Ok(()),
         agent::Response::Error(msg) => Err(Error::ErrorResponse(msg)),
         _ => Err(Error::BadResponse),
     }

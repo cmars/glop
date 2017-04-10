@@ -23,7 +23,11 @@ pub enum Response {
     Add,
     Remove,
     List { names: Vec<String> },
-    SendTo { src: String, dst: String },
+    SendTo {
+        id: String,
+        src: String,
+        dst: String,
+    },
     Introduce(Vec<Response>),
     Error(String),
 }
