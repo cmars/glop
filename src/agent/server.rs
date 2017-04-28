@@ -20,7 +20,7 @@ use self::tokio_service::Service as TokioService;
 
 use super::*;
 use self::agent::{AgentStorage, DurableAgentStorage};
-use self::api::{Request, Response};
+use self::api::{Authenticated, Request, Response};
 use self::token::{DurableTokenStorage, TOKEN_NAME_LEN, TokenStorage};
 
 pub struct ServiceCodec;
@@ -75,24 +75,24 @@ type AgentOutboxMap = HashMap<String, mpsc::Sender<Message>>;
 
 struct ServiceState<S: AgentStorage + Send + 'static> {
     storage: S,
-    outboxes: AgentOutboxMap,
+    local_outboxes: AgentOutboxMap,
 }
 
 impl<S: AgentStorage + Send> ServiceState<S> {
     pub fn new(storage: S) -> ServiceState<S> {
         ServiceState {
             storage: storage,
-            outboxes: AgentOutboxMap::new(),
+            local_outboxes: AgentOutboxMap::new(),
         }
     }
 
     fn has_agent(&self, name: &str) -> bool {
-        self.outboxes.contains_key(name)
+        self.local_outboxes.contains_key(name)
     }
 
     fn remove(&mut self, name: &str) -> Result<(), Error> {
         self.storage.remove_agent(name)?;
-        self.outboxes.remove(name);
+        self.local_outboxes.remove(name);
         Ok(())
     }
 
@@ -158,7 +158,7 @@ impl<S: AgentStorage + Send> Service<S> {
                        }) as Box<runtime::Outbox + Send>)?;
         let (sender, receiver) = mpsc::channel(10);
         let agent = Agent::new(glop, runtime_st, receiver)?;
-        state.outboxes.insert(name.to_string(), sender);
+        state.local_outboxes.insert(name.to_string(), sender);
         self.handle.spawn(self.pool
             .spawn(agent.for_each(|_| Ok(()))
                 .or_else(|e| {
@@ -169,11 +169,11 @@ impl<S: AgentStorage + Send> Service<S> {
         Ok(())
     }
 
-    fn do_call(&self, req: Request) -> Result<Response, Error> {
-        let mut state = self.state.lock().unwrap();
+    fn do_call(&self, req: Authenticated<Request>) -> Result<Response, Error> {
         debug!("request {:?}", &req);
-        let res = match req {
+        let res = match req.item {
             Request::Add { contents: ref add_contents, name: ref add_name } => {
+                let mut state = self.state.lock().unwrap();
                 if state.has_agent(add_name) {
                     return Ok(Response::Error(format!("agent {} already added", add_name)));
                 }
@@ -181,24 +181,26 @@ impl<S: AgentStorage + Send> Service<S> {
                 Response::Add
             }
             Request::Remove { ref name } => {
+                let mut state = self.state.lock().unwrap();
                 state.remove(name)?;
                 Response::Remove
             }
-            Request::List => Response::List { names: state.outboxes.keys().cloned().collect() },
-            Request::SendTo(msg) => self.send_to(&state, msg),
+            Request::List => {
+                let mut state = self.state.lock().unwrap();
+                Response::List { names: state.local_outboxes.keys().cloned().collect() }
+            }
+            Request::SendTo(mut msg) => self.send_to(msg.new_id()),
             Request::Introduce(agent_roles) => {
                 let mut result = vec![];
                 for ref p in agent_roles.iter().combinations(2) {
-                    result.push(self.send_to(&state,
-                                             Message::new("intro", Obj::new())
-                                                 .src(&p[0].name)
-                                                 .src_role(Some(p[0].role.to_string()))
-                                                 .dst(&p[1].name)));
-                    result.push(self.send_to(&state,
-                                             Message::new("intro", Obj::new())
-                                                 .src(&p[1].name)
-                                                 .src_role(Some(p[1].role.to_string()))
-                                                 .dst(&p[0].name)));
+                    result.push(self.send_to(Message::new("intro", Obj::new())
+                        .src(&p[0].name)
+                        .src_role(Some(p[0].role.to_string()))
+                        .dst(&p[1].name)));
+                    result.push(self.send_to(Message::new("intro", Obj::new())
+                        .src(&p[1].name)
+                        .src_role(Some(p[1].role.to_string()))
+                        .dst(&p[0].name)));
                 }
                 Response::Introduce(result)
             }
@@ -207,14 +209,15 @@ impl<S: AgentStorage + Send> Service<S> {
         Ok(res)
     }
 
-    fn send_to(&self, state: &ServiceState<S>, msg: Message) -> Response {
-        if let Some(sender) = state.outboxes.get(&msg.dst) {
+    fn send_to(&self, msg: Message) -> Response {
+        if let Some(sender) = self.state.lock().unwrap().local_outboxes.get(&msg.dst) {
             let resp = Response::SendTo {
                 id: msg.id.to_string(),
                 src: msg.src.to_string(),
                 dst: msg.dst.to_string(),
             };
             let sender = sender.clone();
+            let state_ref = self.state.clone();
             self.handle.spawn(sender.send(msg).then(|_| Ok(())));
             resp
         } else {
@@ -233,7 +236,7 @@ struct SenderOutbox<S: AgentStorage + Send + 'static> {
 impl<S: AgentStorage + Send> runtime::Outbox for SenderOutbox<S> {
     fn send_msg(&self, msg: Message) -> Result<(), Error> {
         let state = self.state.lock().unwrap();
-        let sender = match state.outboxes.get(&msg.dst) {
+        let sender = match state.local_outboxes.get(&msg.dst) {
             Some(s) => s.clone(),
             None => return Err(Error::InvalidArgument(msg.dst.to_string())),
         };
@@ -243,7 +246,7 @@ impl<S: AgentStorage + Send> runtime::Outbox for SenderOutbox<S> {
 }
 
 impl<S: AgentStorage + Send> TokioService for Service<S> {
-    type Request = Request;
+    type Request = Authenticated<Request>;
     type Response = Response;
 
     type Error = std::io::Error;
@@ -263,6 +266,7 @@ impl<S: AgentStorage + Send> TokioService for Service<S> {
 pub struct SecureServiceCodec {
     tokens: Box<TokenStorage>,
     codec: Option<crypto::SecretBoxCodec<ServiceCodec>>,
+    auth_id: Option<String>,
 }
 
 impl SecureServiceCodec {
@@ -271,12 +275,14 @@ impl SecureServiceCodec {
         SecureServiceCodec {
             tokens: tokens,
             codec: None,
+            auth_id: None,
         }
     }
 
-    fn decode_prelude(&mut self,
-                      buf: &mut tokio_core::io::EasyBuf)
-                      -> std::io::Result<Option<crypto::SecretBoxCodec<ServiceCodec>>> {
+    fn decode_prelude
+        (&mut self,
+         buf: &mut tokio_core::io::EasyBuf)
+         -> std::io::Result<Option<(String, crypto::SecretBoxCodec<ServiceCodec>)>> {
         if let Some(i) = buf.as_slice().iter().position(|&b| b == b'\0') {
             // remove the serialized frame from the buffer.
             let line = buf.drain_to(i);
@@ -288,7 +294,8 @@ impl SecureServiceCodec {
             trace!("matched prelude, connection from {}", id);
             match self.tokens.token(id) {
                 Ok(Some(ref token)) => {
-                    Ok(Some(crypto::SecretBoxCodec::new(ServiceCodec, token.key().clone())))
+                    Ok(Some((id.to_string(),
+                             crypto::SecretBoxCodec::new(ServiceCodec, token.key().clone()))))
                 }
                 Ok(None) => {
                     Err(std::io::Error::new(std::io::ErrorKind::Other,
@@ -305,18 +312,30 @@ impl SecureServiceCodec {
 }
 
 impl tokio_core::io::Codec for SecureServiceCodec {
-    type In = <ServiceCodec as tokio_core::io::Codec>::In;
+    type In = Authenticated<<ServiceCodec as tokio_core::io::Codec>::In>;
     type Out = <ServiceCodec as tokio_core::io::Codec>::Out;
 
     fn decode(&mut self, buf: &mut tokio_core::io::EasyBuf) -> std::io::Result<Option<Self::In>> {
         match self.decode_prelude(buf) {
-            Ok(Some(codec)) => self.codec = Some(codec),
+            Ok(Some((id, codec))) => {
+                self.auth_id = Some(id);
+                self.codec = Some(codec);
+            }
             Ok(None) => {}
             Err(e) => return Err(e),
         }
-        if let Some(ref mut codec) = self.codec {
+        if let (&Some(ref id), &mut Some(ref mut codec)) = (&self.auth_id, &mut self.codec) {
             trace!("decoding encrypted contents");
-            codec.decode(buf)
+            match codec.decode(buf) {
+                Ok(Some(req)) => {
+                    Ok(Some(Authenticated {
+                        auth_id: id.to_string(),
+                        item: req,
+                    }))
+                }
+                Ok(None) => Ok(None),
+                Err(e) => Err(e),
+            }
         } else {
             Ok(None)
         }

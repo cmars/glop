@@ -113,6 +113,11 @@ impl Message {
         }
     }
 
+    pub fn new_id(mut self) -> Message {
+        self.id = textnonce::TextNonce::sized_urlsafe(32).unwrap().into_string();
+        self
+    }
+
     pub fn src(mut self, src: &str) -> Message {
         self.src = src.to_string();
         self

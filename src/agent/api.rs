@@ -10,6 +10,12 @@ pub enum Request {
     Introduce(Vec<AgentRole>),
 }
 
+#[derive(Debug)]
+pub struct Authenticated<T> {
+    pub auth_id: String,
+    pub item: T,
+}
+
 #[derive(Serialize, Deserialize)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgentRole {
