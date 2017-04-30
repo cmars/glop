@@ -21,7 +21,6 @@ impl<S: runtime::Storage> Agent<S> {
                st: runtime::State<S>,
                receiver: mpsc::Receiver<Message>)
                -> Result<Agent<S>, Error> {
-        let name = st.name().to_string();
         let mut st = st;
         let (seq, _) = st.mut_storage().load()?;
         if seq == 0 {

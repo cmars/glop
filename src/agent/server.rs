@@ -1,8 +1,10 @@
+extern crate bytes;
 extern crate futures;
 extern crate futures_cpupool;
 extern crate itertools;
 extern crate serde_json;
 extern crate tokio_core;
+extern crate tokio_io;
 extern crate tokio_proto;
 extern crate tokio_service;
 
@@ -15,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use self::futures::{Future, Stream, Sink};
 use self::futures::sync::mpsc;
 use self::itertools::Itertools;
-use self::tokio_core::io::Io;
+use self::tokio_io::{AsyncRead};
 use self::tokio_service::Service as TokioService;
 
 use super::*;
@@ -25,24 +27,25 @@ use self::token::{DurableTokenStorage, TOKEN_NAME_LEN, TokenStorage};
 
 pub struct ServiceCodec;
 
-impl tokio_core::io::Codec for ServiceCodec {
-    type In = Request;
-    type Out = Response;
+impl tokio_io::codec::Decoder for ServiceCodec {
+    type Item = Request;
+    type Error = std::io::Error;
 
-    fn decode(&mut self, buf: &mut tokio_core::io::EasyBuf) -> std::io::Result<Option<Self::In>> {
-        if let Some(i) = buf.as_slice().iter().position(|&b| b == b'\n') {
+    fn decode(&mut self, buf: &mut bytes::BytesMut) -> std::io::Result<Option<Self::Item>> {
+        if let Some(i) = buf.iter().position(|&b| b == b'\n') {
             // remove the serialized frame from the buffer.
-            let line = buf.drain_to(i);
+            let line = buf.split_to(i);
 
             // Also remove the '\n'
-            buf.drain_to(1);
+            buf.split_to(1);
 
             // Deserialize JSON and return it in a Frame.
-            let maybe_req: Result<Self::In, serde_json::error::Error> =
-                serde_json::from_slice(line.as_slice());
+            let maybe_req: Result<Self::Item, serde_json::error::Error> =
+                serde_json::from_slice(&line[..]);
             match maybe_req {
                 Ok(req) => {
                     trace!("service decode {:?}", req);
+                    buf.take();
                     Ok(Some(req))
                 }
                 Err(e) => {
@@ -54,19 +57,25 @@ impl tokio_core::io::Codec for ServiceCodec {
             Ok(None)
         }
     }
+}
 
-    fn encode(&mut self, msg: Self::Out, buf: &mut Vec<u8>) -> std::io::Result<()> {
-        match serde_json::to_writer(buf, &msg) {
-            Ok(_) => {
+impl tokio_io::codec::Encoder for ServiceCodec {
+    type Item = Response;
+    type Error = std::io::Error;
+
+    fn encode(&mut self, msg: Self::Item, buf: &mut bytes::BytesMut) -> std::io::Result<()> {
+        match serde_json::to_vec(&msg) {
+            Ok(json) => {
                 trace!("service encode {:?}", msg);
+                buf.extend(&json[..]);
                 Ok(())
             }
             Err(e) => {
-                error!("service encode failed: {}", e);
+                error!("service encode {:?} failed: {}", msg, e);
                 Err(std::io::Error::new(std::io::ErrorKind::Other, e.description()))
             }
         }?;
-        buf.push(b'\n');
+        buf.extend(&b"\n"[..]);
         Ok(())
     }
 }
@@ -186,10 +195,10 @@ impl<S: AgentStorage + Send> Service<S> {
                 Response::Remove
             }
             Request::List => {
-                let mut state = self.state.lock().unwrap();
+                let state = self.state.lock().unwrap();
                 Response::List { names: state.local_outboxes.keys().cloned().collect() }
             }
-            Request::SendTo(mut msg) => self.send_to(msg.new_id()),
+            Request::SendTo(msg) => self.send_to(msg.new_id()),
             Request::Introduce(agent_roles) => {
                 let mut result = vec![];
                 for ref p in agent_roles.iter().combinations(2) {
@@ -217,7 +226,6 @@ impl<S: AgentStorage + Send> Service<S> {
                 dst: msg.dst.to_string(),
             };
             let sender = sender.clone();
-            let state_ref = self.state.clone();
             self.handle.spawn(sender.send(msg).then(|_| Ok(())));
             resp
         } else {
@@ -281,16 +289,17 @@ impl SecureServiceCodec {
 
     fn decode_prelude
         (&mut self,
-         buf: &mut tokio_core::io::EasyBuf)
+         buf: &mut bytes::BytesMut)
          -> std::io::Result<Option<(String, crypto::SecretBoxCodec<ServiceCodec>)>> {
-        if let Some(i) = buf.as_slice().iter().position(|&b| b == b'\0') {
+        if let Some(i) = buf.iter().position(|&b| b == b'\0') {
             // remove the serialized frame from the buffer.
-            let line = buf.drain_to(i);
+            let line = buf.split_to(i);
 
             // Also remove the '\0'
-            buf.drain_to(1);
+            buf.split_to(1);
 
-            let id = std::str::from_utf8(line.as_slice()).map_err(to_ioerror)?;
+            trace!("from {:?}", line);
+            let id = std::str::from_utf8(&line[..]).map_err(to_ioerror)?;
             trace!("matched prelude, connection from {}", id);
             match self.tokens.token(id) {
                 Ok(Some(ref token)) => {
@@ -303,7 +312,7 @@ impl SecureServiceCodec {
                 }
                 Err(e) => Err(to_ioerror(e)),
             }
-        } else if buf.len() >= TOKEN_NAME_LEN {
+        } else if buf.len() > TOKEN_NAME_LEN+1 {
             Err(std::io::Error::new(std::io::ErrorKind::Other, "missing or invalid prelude"))
         } else {
             Ok(None)
@@ -311,11 +320,11 @@ impl SecureServiceCodec {
     }
 }
 
-impl tokio_core::io::Codec for SecureServiceCodec {
-    type In = Authenticated<<ServiceCodec as tokio_core::io::Codec>::In>;
-    type Out = <ServiceCodec as tokio_core::io::Codec>::Out;
+impl tokio_io::codec::Decoder for SecureServiceCodec {
+    type Item = Authenticated<<ServiceCodec as tokio_io::codec::Decoder>::Item>;
+    type Error = std::io::Error;
 
-    fn decode(&mut self, buf: &mut tokio_core::io::EasyBuf) -> std::io::Result<Option<Self::In>> {
+    fn decode(&mut self, buf: &mut bytes::BytesMut) -> std::io::Result<Option<Self::Item>> {
         match self.decode_prelude(buf) {
             Ok(Some((id, codec))) => {
                 self.auth_id = Some(id);
@@ -328,6 +337,7 @@ impl tokio_core::io::Codec for SecureServiceCodec {
             trace!("decoding encrypted contents");
             match codec.decode(buf) {
                 Ok(Some(req)) => {
+                    buf.take();
                     Ok(Some(Authenticated {
                         auth_id: id.to_string(),
                         item: req,
@@ -340,8 +350,13 @@ impl tokio_core::io::Codec for SecureServiceCodec {
             Ok(None)
         }
     }
+}
 
-    fn encode(&mut self, msg: Self::Out, buf: &mut Vec<u8>) -> std::io::Result<()> {
+impl tokio_io::codec::Encoder for SecureServiceCodec {
+    type Item = <ServiceCodec as tokio_io::codec::Encoder>::Item;
+    type Error = std::io::Error;
+
+    fn encode(&mut self, msg: Self::Item, buf: &mut bytes::BytesMut) -> std::io::Result<()> {
         match self.codec {
             None => {
                 Err(std::io::Error::new(std::io::ErrorKind::Other, "missing or invalid prelude"))

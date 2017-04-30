@@ -1,18 +1,23 @@
+extern crate bytes;
 extern crate byteorder;
 extern crate sodiumoxide;
 extern crate tokio_core;
+extern crate tokio_io;
 
 use std;
-use self::byteorder::{BigEndian, ByteOrder, WriteBytesExt};
+use self::bytes::{BufMut, BytesMut};
+use self::byteorder::{BigEndian, ByteOrder};
 use self::sodiumoxide::crypto::secretbox;
-use self::tokio_core::io::{Codec, EasyBuf};
+use self::tokio_io::codec::{Decoder, Encoder};
 
-pub struct SecretBoxCodec<T: Codec> {
+pub struct SecretBoxCodec<T: Decoder + Encoder> {
     codec: T,
     key: secretbox::Key,
 }
 
-impl<T: Codec> SecretBoxCodec<T> {
+impl<T: Decoder + Encoder> SecretBoxCodec<T>
+    where T: Decoder
+{
     pub fn new(codec: T, key: secretbox::Key) -> SecretBoxCodec<T> {
         SecretBoxCodec {
             codec: codec,
@@ -21,29 +26,29 @@ impl<T: Codec> SecretBoxCodec<T> {
     }
 }
 
-impl<T: Codec> Codec for SecretBoxCodec<T> {
-    type Out = T::Out;
-    type In = T::In;
+impl<T: Decoder> Decoder for SecretBoxCodec<T>
+    where T: Encoder, T: Decoder<Error = std::io::Error>
+{
+    type Item = <T as Decoder>::Item;
+    type Error = std::io::Error;
 
-    fn decode(&mut self, buf: &mut EasyBuf) -> std::io::Result<Option<T::In>> {
+    fn decode(&mut self, buf: &mut BytesMut) -> std::io::Result<Option<<T as Decoder>::Item>> {
         if buf.len() < secretbox::NONCEBYTES + 4 {
             return Ok(None);
         }
-        let h_buf = buf.drain_to(secretbox::NONCEBYTES + 4);
-        let mut h = h_buf.as_slice();
+        let nonce_buf = buf.split_to(secretbox::NONCEBYTES);
+        let nonce = secretbox::Nonce::from_slice(&nonce_buf[..]).unwrap();
 
-        let nonce = secretbox::Nonce::from_slice(&h[0..secretbox::NONCEBYTES]).unwrap();
-        h = &h[secretbox::NONCEBYTES..];
-        let c_len = BigEndian::read_u32(&h[0..4]) as usize;
+        let c_len_buf = buf.split_to(4);
+        let c_len = BigEndian::read_u32(&c_len_buf[0..4]) as usize;
 
         if buf.len() < c_len {
             return Ok(None);
         }
-        let c_buf = buf.drain_to(c_len);
-        match secretbox::open(c_buf.as_slice(), &nonce, &self.key) {
+        match secretbox::open(&buf[..c_len], &nonce, &self.key) {
             Ok(p) => {
                 debug!("open ok");
-                self.codec.decode(&mut EasyBuf::from(p))
+                self.codec.decode(&mut BytesMut::from(p))
             }
             Err(()) => {
                 debug!("open failed, invalid ciphertext");
@@ -51,20 +56,24 @@ impl<T: Codec> Codec for SecretBoxCodec<T> {
             }
         }
     }
+}
 
-    fn encode(&mut self, msg: T::Out, buf: &mut Vec<u8>) -> std::io::Result<()> {
+impl<T: Encoder> Encoder for SecretBoxCodec<T>
+    where T: Decoder, T: Encoder<Error = std::io::Error>
+{
+    type Item = <T as Encoder>::Item;
+    type Error = std::io::Error;
+
+    fn encode(&mut self, msg: <T as Encoder>::Item, buf: &mut BytesMut) -> std::io::Result<()> {
         let nonce = secretbox::gen_nonce();
-        buf.extend_from_slice(&nonce.0);
+        buf.extend(&nonce.0);
 
-        let mut p = vec![];
+        let mut p = BytesMut::with_capacity(0);
         self.codec.encode(msg, &mut p)?;
-        let mut c = secretbox::seal(&p, &nonce, &self.key);
-
-        let mut l = vec![];
-        l.write_u32::<BigEndian>(c.len() as u32)?;
-
-        buf.append(&mut l);
-        buf.append(&mut c);
+        let c = secretbox::seal(&p[..], &nonce, &self.key);
+        buf.reserve(4);
+        buf.put_u32::<BigEndian>(c.len() as u32);
+        buf.extend(&c[..]);
         Ok(())
     }
 }

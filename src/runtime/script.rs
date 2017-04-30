@@ -1,8 +1,10 @@
 extern crate base64;
+extern crate bytes;
 extern crate futures;
 extern crate sodiumoxide;
 extern crate serde_json;
 extern crate tokio_core;
+extern crate tokio_io;
 extern crate tokio_proto;
 extern crate tokio_process;
 extern crate tokio_service;
@@ -12,9 +14,11 @@ use std::error::Error as StdError;
 use std::sync::{Arc, Mutex};
 use std::process::Command;
 
+use self::bytes::BytesMut;
 use self::futures::{future, Future, BoxFuture, Sink, Stream};
 use self::sodiumoxide::crypto::secretbox;
-use self::tokio_core::io::{Codec, EasyBuf, Framed, Io};
+use self::tokio_io::{AsyncRead, AsyncWrite};
+use self::tokio_io::codec::{Decoder, Encoder, Framed};
 use self::tokio_process::CommandExt;
 use self::tokio_service::Service;
 
@@ -58,25 +62,26 @@ pub enum Response {
 
 pub struct ServiceCodec;
 
-impl Codec for ServiceCodec {
-    type In = Request;
-    type Out = Response;
+impl Decoder for ServiceCodec {
+    type Item = Request;
+    type Error = std::io::Error;
 
-    fn decode(&mut self, buf: &mut EasyBuf) -> std::io::Result<Option<Self::In>> {
-        if let Some(i) = buf.as_slice().iter().position(|&b| b == b'\n') {
+    fn decode(&mut self, buf: &mut BytesMut) -> std::io::Result<Option<Self::Item>> {
+        if let Some(i) = buf.iter().position(|&b| b == b'\n') {
             // remove the serialized frame from the buffer.
-            let line = buf.drain_to(i);
+            let line = buf.split_to(i);
 
             // Also remove the '\n'
-            buf.drain_to(1);
+            buf.split_to(1);
 
             // Turn this data into a UTF string and
             // return it in a Frame.
-            let maybe_req: std::result::Result<Self::In, serde_json::error::Error> =
-                serde_json::from_slice(line.as_slice());
+            let maybe_req: std::result::Result<Self::Item, serde_json::error::Error> =
+                serde_json::from_slice(&line[..]);
             match maybe_req {
                 Ok(req) => {
                     debug!("service decode {:?}", req);
+                    buf.take();
                     Ok(Some(req))
                 }
                 Err(e) => {
@@ -88,11 +93,17 @@ impl Codec for ServiceCodec {
             Ok(None)
         }
     }
+}
 
-    fn encode(&mut self, msg: Self::Out, buf: &mut Vec<u8>) -> std::io::Result<()> {
-        match serde_json::to_writer(buf, &msg) {
-            Ok(_) => {
+impl Encoder for ServiceCodec {
+    type Item = Response;
+    type Error = std::io::Error;
+
+    fn encode(&mut self, msg: Self::Item, buf: &mut BytesMut) -> std::io::Result<()> {
+        match serde_json::to_vec(&msg) {
+            Ok(json) => {
                 debug!("service encode {:?}", msg);
+                buf.extend(&json[..]);
                 Ok(())
             }
             Err(e) => {
@@ -100,32 +111,33 @@ impl Codec for ServiceCodec {
                 Err(std::io::Error::new(std::io::ErrorKind::Other, e.description()))
             }
         }?;
-        buf.push(b'\n');
+        buf.extend(&b"\n"[..]);
         Ok(())
     }
 }
 
 pub struct ClientCodec;
 
-impl Codec for ClientCodec {
-    type Out = Request;
-    type In = Response;
+impl Decoder for ClientCodec {
+    type Item = Response;
+    type Error = std::io::Error;
 
-    fn decode(&mut self, buf: &mut EasyBuf) -> std::io::Result<Option<Self::In>> {
-        if let Some(i) = buf.as_slice().iter().position(|&b| b == b'\n') {
+    fn decode(&mut self, buf: &mut BytesMut) -> std::io::Result<Option<Self::Item>> {
+        if let Some(i) = buf.iter().position(|&b| b == b'\n') {
             // remove the serialized frame from the buffer.
-            let line = buf.drain_to(i);
+            let line = buf.split_to(i);
 
             // Also remove the '\n'
-            buf.drain_to(1);
+            buf.split_to(1);
 
             // Turn this data into a UTF string and
             // return it in a Frame.
-            let maybe_req: std::result::Result<Self::In, serde_json::error::Error> =
-                serde_json::from_slice(line.as_slice());
+            let maybe_req: std::result::Result<Self::Item, serde_json::error::Error> =
+                serde_json::from_slice(&line[..]);
             match maybe_req {
                 Ok(req) => {
                     debug!("client decode {:?}", req);
+                    buf.take();
                     Ok(Some(req))
                 }
                 Err(e) => {
@@ -137,11 +149,17 @@ impl Codec for ClientCodec {
             Ok(None)
         }
     }
+}
 
-    fn encode(&mut self, msg: Self::Out, buf: &mut Vec<u8>) -> std::io::Result<()> {
-        match serde_json::to_writer(buf, &msg) {
-            Ok(_) => {
+impl Encoder for ClientCodec {
+    type Item = Request;
+    type Error = std::io::Error;
+
+    fn encode(&mut self, msg: Self::Item, buf: &mut BytesMut) -> std::io::Result<()> {
+        match serde_json::to_vec(&msg) {
+            Ok(json) => {
                 debug!("client encode {:?}", msg);
+                buf.extend(&json[..]);
                 Ok(())
             }
             Err(e) => {
@@ -149,7 +167,7 @@ impl Codec for ClientCodec {
                 Err(std::io::Error::new(std::io::ErrorKind::Other, e.description()))
             }
         }?;
-        buf.push(b'\n');
+        buf.extend(&b"\n"[..]);
         Ok(())
     }
 }
@@ -171,7 +189,7 @@ impl ClientProto {
     }
 }
 
-impl<T: Io + 'static> tokio_proto::pipeline::ClientProto<T> for ClientProto {
+impl<T: AsyncRead + AsyncWrite + 'static> tokio_proto::pipeline::ClientProto<T> for ClientProto {
     type Request = Request;
     type Response = Response;
     type Transport = Framed<T, crypto::SecretBoxCodec<ClientCodec>>;

@@ -1,9 +1,11 @@
 extern crate base64;
+extern crate bytes;
 extern crate futures;
 extern crate sodiumoxide;
 extern crate serde_json;
 extern crate textnonce;
 extern crate tokio_core;
+extern crate tokio_io;
 extern crate tokio_proto;
 extern crate tokio_service;
 
@@ -24,25 +26,26 @@ use self::token::{DurableTokenStorage, Token, TokenStorage};
 
 pub struct ClientCodec;
 
-impl tokio_core::io::Codec for ClientCodec {
-    type Out = Request;
-    type In = Response;
+impl tokio_io::codec::Decoder for ClientCodec {
+    type Item = Response;
+    type Error = std::io::Error;
 
-    fn decode(&mut self, buf: &mut tokio_core::io::EasyBuf) -> std::io::Result<Option<Self::In>> {
-        if let Some(i) = buf.as_slice().iter().position(|&b| b == b'\n') {
+    fn decode(&mut self, buf: &mut bytes::BytesMut) -> std::io::Result<Option<Self::Item>> {
+        if let Some(i) = buf.iter().position(|&b| b == b'\n') {
             // remove the serialized frame from the buffer.
-            let line = buf.drain_to(i);
+            let line = buf.split_to(i);
 
             // Also remove the '\n'
-            buf.drain_to(1);
+            buf.split_to(1);
 
             // Turn this data into a UTF string and
             // return it in a Frame.
-            let maybe_req: Result<Self::In, serde_json::error::Error> =
-                serde_json::from_slice(line.as_slice());
+            let maybe_req: Result<Self::Item, serde_json::error::Error> =
+                serde_json::from_slice(&line[..]);
             match maybe_req {
                 Ok(req) => {
                     debug!("client decode: {:?}", req);
+                    buf.take();
                     Ok(Some(req))
                 }
                 Err(e) => {
@@ -54,11 +57,17 @@ impl tokio_core::io::Codec for ClientCodec {
             Ok(None)
         }
     }
+}
 
-    fn encode(&mut self, msg: Self::Out, buf: &mut Vec<u8>) -> std::io::Result<()> {
-        match serde_json::to_writer(buf, &msg) {
-            Ok(_) => {
+impl tokio_io::codec::Encoder for ClientCodec {
+    type Item = Request;
+    type Error = std::io::Error;
+
+    fn encode(&mut self, msg: Self::Item, buf: &mut bytes::BytesMut) -> std::io::Result<()> {
+        match serde_json::to_vec(&msg) {
+            Ok(json) => {
                 debug!("client encode: {:?}", msg);
+                buf.extend(&json[..]);
                 Ok(())
             }
             Err(e) => {
@@ -66,7 +75,7 @@ impl tokio_core::io::Codec for ClientCodec {
                 Err(std::io::Error::new(std::io::ErrorKind::Other, e.description()))
             }
         }?;
-        buf.push(b'\n');
+        buf.extend(&b"\n"[..]);
         Ok(())
     }
 }
@@ -85,20 +94,25 @@ impl SecureClientCodec {
     }
 }
 
-impl tokio_core::io::Codec for SecureClientCodec {
-    type In = <ClientCodec as tokio_core::io::Codec>::In;
-    type Out = <ClientCodec as tokio_core::io::Codec>::Out;
+impl tokio_io::codec::Decoder for SecureClientCodec {
+    type Item = <ClientCodec as tokio_io::codec::Decoder>::Item;
+    type Error = std::io::Error;
 
-    fn encode(&mut self, msg: Self::Out, buf: &mut Vec<u8>) -> std::io::Result<()> {
+    fn decode(&mut self, buf: &mut bytes::BytesMut) -> std::io::Result<Option<Self::Item>> {
+        self.codec.decode(buf)
+    }
+}
+
+impl tokio_io::codec::Encoder for SecureClientCodec {
+    type Item = <ClientCodec as tokio_io::codec::Encoder>::Item;
+    type Error = std::io::Error;
+
+    fn encode(&mut self, msg: Self::Item, buf: &mut bytes::BytesMut) -> std::io::Result<()> {
         // Write prelude identifying the secret key.
         buf.extend(self.id.as_bytes());
-        buf.extend(b"\0");
+        buf.extend(&b"\0"[..]);
         // Encrypt the message with the associated secret key.
         self.codec.encode(msg, buf)
-    }
-
-    fn decode(&mut self, buf: &mut tokio_core::io::EasyBuf) -> std::io::Result<Option<Self::In>> {
-        self.codec.decode(buf)
     }
 }
 
@@ -112,10 +126,10 @@ impl ClientProto {
     }
 }
 
-impl<T: tokio_core::io::Io + 'static> tokio_proto::pipeline::ClientProto<T> for ClientProto {
+impl<T: tokio_io::AsyncRead + tokio_io::AsyncWrite + 'static> tokio_proto::pipeline::ClientProto<T> for ClientProto {
     type Request = Request;
     type Response = Response;
-    type Transport = tokio_core::io::Framed<T, SecureClientCodec>;
+    type Transport = tokio_io::codec::Framed<T, SecureClientCodec>;
     type BindTransport = Result<Self::Transport, std::io::Error>;
 
     fn bind_transport(&self, io: T) -> Self::BindTransport {

@@ -203,7 +203,11 @@ fn script_server_access_msg() {
         Some(txn) => txn,
         None => panic!("expected match"),
     };
-    assert!(st.commit(&mut txn).is_ok());
+    match st.commit(&mut txn) {
+        Err(e) => {panic!("bad: {}", e)}
+        _ => {}
+    };
+    //assert!(st.commit(&mut txn).is_ok());
     assert_eq!(st.storage().vars().get("all"),
                Some(&Value::from_str("good")));
 }

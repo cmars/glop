@@ -12,6 +12,7 @@ peg = { version = "0.4" }
 
 [dependencies]
 base64 = "0.4"
+bytes = "0.4"
 byteorder = "1.0"
 clap = "2.19"
 env_logger = "0.4"
@@ -26,6 +27,7 @@ sodiumoxide = "0.0.14"
 spoolq = "0.2.1"
 textnonce = "0.4"
 tokio-core = "0.1"
+tokio-io = "0.1"
 tokio-service = "0.1"
 tokio-proto = "0.1"
 tokio-process = "0.1"
