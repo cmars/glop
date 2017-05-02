@@ -80,28 +80,29 @@ impl tokio_io::codec::Encoder for ServiceCodec {
     }
 }
 
-type AgentOutboxMap = HashMap<String, mpsc::Sender<Message>>;
+/// Associate local agent name with a sender that sends messages to that agent.
+type AgentSenderMap = HashMap<String, mpsc::Sender<Message>>;
 
 struct ServiceState<S: AgentStorage + Send + 'static> {
     storage: S,
-    local_outboxes: AgentOutboxMap,
+    local_senders: AgentSenderMap,
 }
 
 impl<S: AgentStorage + Send> ServiceState<S> {
     pub fn new(storage: S) -> ServiceState<S> {
         ServiceState {
             storage: storage,
-            local_outboxes: AgentOutboxMap::new(),
+            local_senders: AgentSenderMap::new(),
         }
     }
 
     fn has_agent(&self, name: &str) -> bool {
-        self.local_outboxes.contains_key(name)
+        self.local_senders.contains_key(name)
     }
 
     fn remove(&mut self, name: &str) -> Result<(), Error> {
         self.storage.remove_agent(name)?;
-        self.local_outboxes.remove(name);
+        self.local_senders.remove(name);
         Ok(())
     }
 
@@ -167,7 +168,7 @@ impl<S: AgentStorage + Send> Service<S> {
                        }) as Box<runtime::Outbox + Send>)?;
         let (sender, receiver) = mpsc::channel(10);
         let agent = Agent::new(glop, runtime_st, receiver)?;
-        state.local_outboxes.insert(name.to_string(), sender);
+        state.local_senders.insert(name.to_string(), sender);
         self.handle.spawn(self.pool
             .spawn(agent.for_each(|_| Ok(()))
                 .or_else(|e| {
@@ -196,7 +197,7 @@ impl<S: AgentStorage + Send> Service<S> {
             }
             Request::List => {
                 let state = self.state.lock().unwrap();
-                Response::List { names: state.local_outboxes.keys().cloned().collect() }
+                Response::List { names: state.local_senders.keys().cloned().collect() }
             }
             Request::SendTo(msg) => self.send_to(msg.new_id()),
             Request::Introduce(agent_roles) => {
@@ -219,7 +220,7 @@ impl<S: AgentStorage + Send> Service<S> {
     }
 
     fn send_to(&self, msg: Message) -> Response {
-        if let Some(sender) = self.state.lock().unwrap().local_outboxes.get(&msg.dst) {
+        if let Some(sender) = self.state.lock().unwrap().local_senders.get(&msg.dst) {
             let resp = Response::SendTo {
                 id: msg.id.to_string(),
                 src: msg.src.to_string(),
@@ -244,7 +245,7 @@ struct SenderOutbox<S: AgentStorage + Send + 'static> {
 impl<S: AgentStorage + Send> runtime::Outbox for SenderOutbox<S> {
     fn send_msg(&self, msg: Message) -> Result<(), Error> {
         let state = self.state.lock().unwrap();
-        let sender = match state.local_outboxes.get(&msg.dst) {
+        let sender = match state.local_senders.get(&msg.dst) {
             Some(s) => s.clone(),
             None => return Err(Error::InvalidArgument(msg.dst.to_string())),
         };
