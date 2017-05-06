@@ -254,13 +254,18 @@ struct SenderOutbox<S: AgentStorage + Send + 'static> {
 
 impl<S: AgentStorage + Send> runtime::Outbox for SenderOutbox<S> {
     fn send_msg(&self, msg: Message) -> Result<(), Error> {
-        let state = self.state.lock().unwrap();
-        let sender = match state.local_senders.get(&msg.dst_agent) {
-            Some(s) => s.clone(),
-            None => return Err(Error::InvalidArgument(msg.dst_agent.to_string())),
-        };
-        self.remote.spawn(|_| sender.send(msg).then(|_| Ok(())));
-        Ok(())
+        let mut state = self.state.lock().unwrap();
+        match msg.dst_remote.clone() {
+            Some(_) => state.storage.push_remote_msg(msg),
+            None => {
+                let sender = match state.local_senders.get(&msg.dst_agent) {
+                    Some(s) => s.clone(),
+                    None => return Err(Error::InvalidArgument(msg.dst_agent.to_string())),
+                };
+                self.remote.spawn(|_| sender.send(msg).then(|_| Ok(())));
+                Ok(())
+            }
+        }
     }
 }
 

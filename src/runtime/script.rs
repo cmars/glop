@@ -316,14 +316,14 @@ impl Service for ScriptService {
                 if let Some(ref src_msg) = ctx.msgs.get(src_topic) {
                     let mut actions = self.actions.lock().unwrap();
                     actions.push(Action::SendMsg {
-                                     dst_remote: None, // FIXME: need to get this out of ctx
+                                     dst_remote: src_msg.src_remote.clone(),
                                      dst_agent: src_msg.src_agent.to_string(),
                                      topic: topic.to_string(),
                                      contents: contents.clone(),
                                  });
                     drop(actions);
                     Response::SendMsg {
-                        dst_remote: None, // FIXME: need to resolve
+                        dst_remote: src_msg.src_remote.clone(),
                         dst_agent: src_msg.src_agent.to_string(),
                         topic: topic.to_string(),
                     }

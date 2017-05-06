@@ -91,7 +91,6 @@ impl<S: Storage> State<S> {
         let mut self_msgs = Vec::new();
         let actions = txn.apply()?;
         let matched_topics = txn.matched_topics();
-        //let replies = vec![];
         for action in actions {
             debug!(target: "State.commit", "action {:?}", action);
             match &action {
@@ -110,7 +109,8 @@ impl<S: Storage> State<S> {
                     let msg = Message::new(topic, contents.clone())
                         .src_agent(&self.name)
                         .src_role(txn.m.acting_role.clone())
-                        .dst_agent(dst_agent);
+                        .dst_agent(dst_agent)
+                        .dst_remote(dst_remote.clone());
                     debug!("send {:?}", msg);
                     if dst_agent == "self" {
                         self_msgs.push(msg);

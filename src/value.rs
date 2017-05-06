@@ -162,8 +162,8 @@ impl Message {
         self
     }
 
-    pub fn dst_remote(mut self, dst_remote: &str) -> Message {
-        self.dst_remote = Some(dst_remote.to_string());
+    pub fn dst_remote(mut self, dst_remote: Option<String>) -> Message {
+        self.dst_remote = dst_remote.clone();
         self
     }
 

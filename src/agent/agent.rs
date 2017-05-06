@@ -1,5 +1,6 @@
 extern crate futures;
 extern crate serde_json;
+extern crate spoolq;
 
 use std;
 use std::collections::HashMap;
@@ -24,18 +25,19 @@ impl<S: runtime::Storage> Agent<S> {
         let mut st = st;
         let (seq, _) = st.mut_storage().load()?;
         if seq == 0 {
-            st.mut_storage().push_msg(Message::new("init", Obj::new()))?;
+            st.mut_storage()
+                .push_msg(Message::new("init", Obj::new()))?;
         }
         let m_excs = glop.matches
             .iter()
             .map(|m_ast| runtime::Match::new_from_ast(&m_ast))
             .collect::<Vec<_>>();
         Ok(Agent {
-            matches: m_excs,
-            st: st,
-            receiver: receiver,
-            match_index: 0,
-        })
+               matches: m_excs,
+               st: st,
+               receiver: receiver,
+               match_index: 0,
+           })
     }
 
     fn poll_matches(&mut self) -> futures::Poll<Option<()>, Error> {
@@ -94,17 +96,22 @@ pub trait AgentStorage {
     fn add_agent(&mut self, name: String, glop: ast::Glop) -> Result<(), Error>;
     fn remove_agent(&mut self, name: &str) -> Result<(), Error>;
     fn agents(&self) -> Result<HashMap<String, ast::Glop>, Error>;
+    fn push_remote_msg(&mut self, msg: Message) -> Result<(), Error>;
 }
 
 #[derive(Clone)]
 pub struct MemAgentStorage {
     agents: HashMap<String, ast::Glop>,
+    remote_msgs: HashMap<String, Vec<Message>>,
 }
 
 impl MemAgentStorage {
     #[allow(dead_code)]
     pub fn new() -> MemAgentStorage {
-        MemAgentStorage { agents: HashMap::new() }
+        MemAgentStorage {
+            agents: HashMap::new(),
+            remote_msgs: HashMap::new(),
+        }
     }
 }
 
@@ -134,12 +141,24 @@ impl AgentStorage for MemAgentStorage {
     fn agents(&self) -> Result<HashMap<String, ast::Glop>, Error> {
         Ok(self.agents.clone())
     }
+
+    fn push_remote_msg(&mut self, msg: Message) -> Result<(), Error> {
+        if let Some(ref dst_target) = msg.dst_remote.clone() {
+            if !self.remote_msgs.contains_key(dst_target) {
+                self.remote_msgs.insert(dst_target.to_string(), vec![]);
+            }
+            let msgs = self.remote_msgs.get_mut(dst_target).unwrap();
+            msgs.push(msg);
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone)]
 pub struct DurableAgentStorage {
     path: String,
     agents_json_path: String,
+    remote_msgs: HashMap<String, spoolq::Queue<Message>>,
 }
 
 impl DurableAgentStorage {
@@ -151,6 +170,7 @@ impl DurableAgentStorage {
                 .to_str()
                 .unwrap()
                 .to_string(),
+            remote_msgs: HashMap::new(),
         }
     }
 
@@ -158,21 +178,24 @@ impl DurableAgentStorage {
         if !std::path::PathBuf::from(&self.agents_json_path).exists() {
             return Ok(HashMap::new());
         }
-        let agents_file = std::fs::OpenOptions::new().read(true)
+        let agents_file = std::fs::OpenOptions::new()
+            .read(true)
             .open(&self.agents_json_path)?;
-        let agents: HashMap<String, ast::Glop> =
-            serde_json::from_reader(agents_file).map_err(to_ioerror)
-                .map_err(Error::IO)?;
+        let agents: HashMap<String, ast::Glop> = serde_json::from_reader(agents_file)
+            .map_err(to_ioerror)
+            .map_err(Error::IO)?;
         Ok(agents)
     }
 
     fn save_agents(&self, agents: HashMap<String, ast::Glop>) -> Result<(), Error> {
-        let mut agents_file = std::fs::OpenOptions::new().write(true)
+        let mut agents_file = std::fs::OpenOptions::new()
+            .write(true)
             .mode(0o600)
             .create(true)
             .truncate(true)
             .open(&self.agents_json_path)?;
-        serde_json::to_writer(&mut agents_file, &agents).map_err(to_ioerror)
+        serde_json::to_writer(&mut agents_file, &agents)
+            .map_err(to_ioerror)
             .map_err(Error::IO)?;
         Ok(())
     }
@@ -211,5 +234,21 @@ impl AgentStorage for DurableAgentStorage {
     fn agents(&self) -> Result<HashMap<String, ast::Glop>, Error> {
         let agents = self.load_agents()?;
         Ok(agents)
+    }
+
+    fn push_remote_msg(&mut self, msg: Message) -> Result<(), Error> {
+        if let Some(ref dst_target) = msg.dst_remote.clone() {
+            if !self.remote_msgs.contains_key(dst_target) {
+                let q = spoolq::Queue::<Message>::new(std::path::PathBuf::from(&self.path)
+                                                          .join("remote_msgs")
+                                                          .to_str()
+                                                          .unwrap())
+                        .map_err(Error::IO)?;
+                self.remote_msgs.insert(dst_target.to_string(), q);
+            }
+            let q = self.remote_msgs.get_mut(dst_target).unwrap();
+            return q.push(msg).map_err(Error::IO);
+        }
+        Ok(())
     }
 }
