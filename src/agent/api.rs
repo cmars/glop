@@ -8,6 +8,8 @@ pub enum Request {
     List,
     SendTo(Message),
     Introduce(Vec<AgentRole>),
+    FetchReply { in_reply_to: String },
+    FetchMsgs,
 }
 
 #[derive(Debug)]
@@ -35,5 +37,7 @@ pub enum Response {
         dst_agent: String,
     },
     Introduce(Vec<Response>),
+    FetchReply(Option<Message>),
+    FetchMsgs(Vec<Message>),
     Error(String),
 }
