@@ -31,8 +31,8 @@ pub enum Response {
     List { names: Vec<String> },
     SendTo {
         id: String,
-        src: String,
-        dst: String,
+        src_agent: String,
+        dst_agent: String,
     },
     Introduce(Vec<Response>),
     Error(String),

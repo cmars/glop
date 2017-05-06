@@ -65,9 +65,9 @@ cargo run var set all good
 
 fn test_msg(topic: &str, contents: Obj) -> Message {
     Message::new(topic, contents)
-        .src("")
+        .src_agent("test_src")
         .src_role(None)
-        .dst("test")
+        .dst_agent("test_dst")
 }
 
 fn parse_one_match(s: &str) -> ast::Match {
@@ -82,15 +82,17 @@ fn simple_script() {
 
     let m_ast = parse_one_match(SIMPLE_SCRIPT_OK);
     let mut st = State::new("test", MemStorage::new());
-    st.mut_storage().push_msg(test_msg("init", Obj::new())).unwrap();
+    st.mut_storage()
+        .push_msg(test_msg("init", Obj::new()))
+        .unwrap();
     let m_exc = Match::new_from_ast(&m_ast);
     let mut txn = match st.eval(m_exc.clone()).unwrap() {
         Some(mut txn) => {
             assert_eq!(txn.seq, 0);
             txn.with_context(|ref mut ctx| {
-                assert!(ctx.msgs.contains_key("init"));
-                assert_eq!(ctx.msgs.len(), 1);
-            });
+                                 assert!(ctx.msgs.contains_key("init"));
+                                 assert_eq!(ctx.msgs.len(), 1);
+                             });
             txn
         }
         None => panic!("expected match"),
@@ -104,15 +106,17 @@ fn simple_script_err() {
 
     let m_ast = parse_one_match(SIMPLE_SCRIPT_ERR);
     let mut st = State::new("test", MemStorage::new());
-    st.mut_storage().push_msg(test_msg("init", Obj::new())).unwrap();
+    st.mut_storage()
+        .push_msg(test_msg("init", Obj::new()))
+        .unwrap();
     let m_exc = Match::new_from_ast(&m_ast);
     let mut txn = match st.eval(m_exc.clone()).unwrap() {
         Some(mut txn) => {
             assert_eq!(txn.seq, 0);
             txn.with_context(|ref mut ctx| {
-                assert!(ctx.msgs.contains_key("init"));
-                assert_eq!(ctx.msgs.len(), 1);
-            });
+                                 assert!(ctx.msgs.contains_key("init"));
+                                 assert_eq!(ctx.msgs.len(), 1);
+                             });
             txn
         }
         None => panic!("expected match"),
@@ -151,9 +155,9 @@ fn env_check_script_ok() {
         Some(mut txn) => {
             assert_eq!(txn.seq, 0);
             txn.with_context(|ref mut ctx| {
-                assert!(ctx.msgs.contains_key("test"));
-                assert_eq!(ctx.msgs.len(), 1);
-            });
+                                 assert!(ctx.msgs.contains_key("test"));
+                                 assert_eq!(ctx.msgs.len(), 1);
+                             });
             txn
         }
         None => panic!("expected match"),
@@ -167,15 +171,17 @@ fn hello_script_server() {
 
     let m_ast = parse_one_match(HELLO_SCRIPT_SERVER);
     let mut st = State::new("test", MemStorage::new());
-    st.mut_storage().push_msg(test_msg("init", Obj::new())).unwrap();
+    st.mut_storage()
+        .push_msg(test_msg("init", Obj::new()))
+        .unwrap();
     let m_exc = Match::new_from_ast(&m_ast);
     let mut txn = match st.eval(m_exc.clone()).unwrap() {
         Some(mut txn) => {
             assert_eq!(txn.seq, 0);
             txn.with_context(|ctx| {
-                assert!(ctx.msgs.contains_key("init"));
-                assert_eq!(ctx.msgs.len(), 1);
-            });
+                                 assert!(ctx.msgs.contains_key("init"));
+                                 assert_eq!(ctx.msgs.len(), 1);
+                             });
             txn
         }
         None => panic!("expected match"),
@@ -204,7 +210,7 @@ fn script_server_access_msg() {
         None => panic!("expected match"),
     };
     match st.commit(&mut txn) {
-        Err(e) => {panic!("bad: {}", e)}
+        Err(e) => panic!("bad: {}", e),
         _ => {}
     };
     //assert!(st.commit(&mut txn).is_ok());

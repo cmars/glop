@@ -51,7 +51,29 @@ impl Transaction {
                     vec![action.clone()]
                 }
                 Action::Script(ref contents) => self.exec_script(contents)?,
-                Action::SendMsg { dst: _, topic: _, contents: _ } => vec![action],
+                Action::SendMsg {
+                    dst_remote: _,
+                    dst_agent: _,
+                    topic: _,
+                    contents: _,
+                } => vec![action],
+                Action::ReplyTo {
+                    ref topic,
+                    ref contents,
+                } => {
+                    let ctx = self.ctx.lock().unwrap();
+                    match ctx.msgs.get(topic) {
+                        Some(ref subject) => {
+                            vec![Action::SendMsg {
+                                     dst_agent: subject.src_agent.to_string(),
+                                     dst_remote: subject.src_remote.clone(),
+                                     topic: topic.to_string(),
+                                     contents: contents.clone(),
+                                 }]
+                        }
+                        None => return Err(Error::UndeliverableMessage(topic.to_string())),
+                    }
+                }
                 Action::Match(ref m) => {
                     if self.eval_match(m) {
                         self.matched_topics.extend(m.topics());
@@ -89,7 +111,11 @@ impl Transaction {
             }
             &Condition::IsSet(ref k) => k.is_set(&ctx.vars),
             &Condition::IsUnset(ref k) => !k.is_set(&ctx.vars),
-            &Condition::Message { ref topic, ref src_role, acting_role: _ } => {
+            &Condition::Message {
+                 ref topic,
+                 ref src_role,
+                 acting_role: _,
+             } => {
                 if let Some(msg) = ctx.msgs.get(topic) {
                     src_role.eq(&msg.src_role)
                 } else {
@@ -108,17 +134,21 @@ impl Transaction {
 
     fn exec_script(&mut self, contents: &str) -> Result<Vec<Action>> {
         let mut script_path_buf = std::env::temp_dir();
-        let script_path_base = textnonce::TextNonce::sized_urlsafe(32).unwrap().into_string();
+        let script_path_base = textnonce::TextNonce::sized_urlsafe(32)
+            .unwrap()
+            .into_string();
         script_path_buf.push(&script_path_base);
         let script_path = script_path_buf.to_str().unwrap();
         let cleanup = cleanup::Cleanup::File(script_path.to_string());
         {
-            let mut script_file = OpenOptions::new().write(true)
+            let mut script_file = OpenOptions::new()
+                .write(true)
                 .mode(0o700)
                 .create_new(true)
                 .open(script_path)
                 .map_err(error::Error::IO)?;
-            script_file.write_all(contents.as_bytes())
+            script_file
+                .write_all(contents.as_bytes())
                 .map_err(error::Error::IO)?;
         }
 

@@ -88,38 +88,72 @@ impl Value {
     }
 }
 
+/// A free-form structured object.
 pub type Obj = HashMap<String, Value>;
 
+/// Messages are the basis of communication among agents.
 #[derive(Serialize, Deserialize)]
 #[derive(Clone, Debug)]
 pub struct Message {
+    /// Unique ID assigned to each message.
     pub id: String,
-    pub src: String,
+
+    /// Source remote ID. None if local source.
+    pub src_remote: Option<String>,
+
+    /// Source agent name.
+    pub src_agent: String,
+
+    /// Source role name, if the message is addressed as coming from an agent acting in a role.
     pub src_role: Option<String>,
-    pub dst: String,
+
+    /// Destination remote ID. None if local destination.
+    pub dst_remote: Option<String>,
+
+    /// Destination agent name.
+    pub dst_agent: String,
+
+    /// ID of message being replied to.
+    pub in_reply_to: Option<String>,
+
+    /// Topic of the message.
     pub topic: String,
+
+    /// Contents of the message.
     pub contents: Obj,
 }
 
 impl Message {
     pub fn new(topic: &str, contents: Obj) -> Message {
         Message {
-            id: textnonce::TextNonce::sized_urlsafe(32).unwrap().into_string(),
-            src: "".to_string(),
+            id: textnonce::TextNonce::sized_urlsafe(32)
+                .unwrap()
+                .into_string(),
+            src_remote: None,
+            src_agent: "".to_string(),
             src_role: None,
-            dst: "".to_string(),
+            dst_remote: None,
+            dst_agent: "".to_string(),
             topic: topic.to_string(),
+            in_reply_to: None,
             contents: contents,
         }
     }
 
     pub fn new_id(mut self) -> Message {
-        self.id = textnonce::TextNonce::sized_urlsafe(32).unwrap().into_string();
+        self.id = textnonce::TextNonce::sized_urlsafe(32)
+            .unwrap()
+            .into_string();
         self
     }
 
-    pub fn src(mut self, src: &str) -> Message {
-        self.src = src.to_string();
+    pub fn src_remote(mut self, src_remote: &str) -> Message {
+        self.src_remote = Some(src_remote.to_string());
+        self
+    }
+
+    pub fn src_agent(mut self, src_agent: &str) -> Message {
+        self.src_agent = src_agent.to_string();
         self
     }
 
@@ -128,12 +162,23 @@ impl Message {
         self
     }
 
-    pub fn dst(mut self, dst: &str) -> Message {
-        self.dst = dst.to_string();
+    pub fn dst_remote(mut self, dst_remote: &str) -> Message {
+        self.dst_remote = Some(dst_remote.to_string());
+        self
+    }
+
+    pub fn dst_agent(mut self, dst_agent: &str) -> Message {
+        self.dst_agent = dst_agent.to_string();
+        self
+    }
+
+    pub fn in_reply_to(mut self, in_reply_to: Option<String>) -> Message {
+        self.in_reply_to = in_reply_to.clone();
         self
     }
 }
 
+/// Environment variable settings.
 pub type Env = HashMap<String, String>;
 
 #[derive(Serialize, Deserialize)]

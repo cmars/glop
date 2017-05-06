@@ -30,30 +30,30 @@ pub trait Outbox {
 }
 
 pub struct State<S: Storage> {
-    src: String,
+    name: String,
     storage: S,
     outbox: Box<Outbox + Send + 'static>,
 }
 
 impl<S: Storage> State<S> {
-    pub fn new(src: &str, storage: S) -> State<S> {
+    pub fn new(name: &str, storage: S) -> State<S> {
         State {
-            src: src.to_string(),
+            name: name.to_string(),
             storage: storage,
             outbox: Box::new(UndeliverableOutbox) as Box<Outbox + Send>,
         }
     }
 
-    pub fn new_outbox(src: &str, storage: S, outbox: Box<Outbox + Send + 'static>) -> State<S> {
+    pub fn new_outbox(name: &str, storage: S, outbox: Box<Outbox + Send + 'static>) -> State<S> {
         State {
-            src: src.to_string(),
+            name: name.to_string(),
             storage: storage,
             outbox: outbox,
         }
     }
 
     pub fn name(&self) -> &str {
-        &self.src
+        &self.name
     }
 
     pub fn storage(&self) -> &S {
@@ -68,12 +68,13 @@ impl<S: Storage> State<S> {
         debug!("State.eval: {:?}", &m);
         let (seq, vars) = self.storage.load()?;
         let msgs = self.storage.next_messages(&m.filters())?;
-        let ctx = Context::new(&self.src, vars, msgs, self.storage.workspace());
+        let ctx = Context::new(&self.name, vars, msgs, self.storage.workspace());
         let txn = Transaction::new(m, seq, ctx);
         if txn.eval() {
             debug!("State.eval: MATCHED");
             Ok(Some(txn))
         } else {
+            // Re-enqueue messages that didn't match.
             debug!("State.eval: MISSED");
             let mut ctx = txn.ctx.lock().unwrap();
             for (_topic, msg) in ctx.msgs.drain() {
@@ -90,6 +91,7 @@ impl<S: Storage> State<S> {
         let mut self_msgs = Vec::new();
         let actions = txn.apply()?;
         let matched_topics = txn.matched_topics();
+        //let replies = vec![];
         for action in actions {
             debug!(target: "State.commit", "action {:?}", action);
             match &action {
@@ -99,17 +101,21 @@ impl<S: Storage> State<S> {
                 &Action::UnsetVar(ref k) => {
                     k.unset(&mut vars);
                 }
-                &Action::SendMsg { ref dst, ref topic, ref contents } => {
+                &Action::SendMsg {
+                     ref dst_remote,
+                     ref dst_agent,
+                     ref topic,
+                     ref contents,
+                 } => {
                     let msg = Message::new(topic, contents.clone())
-                        .src(&self.src)
+                        .src_agent(&self.name)
                         .src_role(txn.m.acting_role.clone())
-                        .dst(dst);
+                        .dst_agent(dst_agent);
                     debug!("send {:?}", msg);
-                    if dst == "self" {
+                    if dst_agent == "self" {
                         self_msgs.push(msg);
                     } else {
-                        self.outbox
-                            .send_msg(msg)?;
+                        self.outbox.send_msg(msg)?;
                     }
                 }
                 _ => return Err(Error::UnsupportedAction),
@@ -143,7 +149,7 @@ pub struct UndeliverableOutbox;
 
 impl Outbox for UndeliverableOutbox {
     fn send_msg(&self, msg: Message) -> Result<()> {
-        Err(Error::UndeliverableMessage(msg.dst.to_string()))
+        Err(Error::UndeliverableMessage(msg.dst_agent.to_string()))
     }
 }
 
@@ -160,7 +166,11 @@ impl MemStorage {
             seq: 0,
             vars: HashMap::new(),
             msgs: HashMap::new(),
-            workspace: std::env::current_dir().unwrap().to_str().unwrap().to_string(),
+            workspace: std::env::current_dir()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_string(),
         }
     }
 }
@@ -241,31 +251,42 @@ pub struct DurableStorage {
 
 impl DurableStorage {
     pub fn new(path: &str) -> Result<DurableStorage> {
-        let checkpoint_path =
-            std::path::PathBuf::from(path).join("checkpoint.json").to_str().unwrap().to_string();
-        let topics_path =
-            std::path::PathBuf::from(path).join("topics").to_str().unwrap().to_string();
-        std::fs::DirBuilder::new().recursive(true)
+        let checkpoint_path = std::path::PathBuf::from(path)
+            .join("checkpoint.json")
+            .to_str()
+            .unwrap()
+            .to_string();
+        let topics_path = std::path::PathBuf::from(path)
+            .join("topics")
+            .to_str()
+            .unwrap()
+            .to_string();
+        std::fs::DirBuilder::new()
+            .recursive(true)
             .mode(0o700)
             .create(&topics_path)
             .map_err(error::Error::IO)?;
-        let workspace =
-            std::path::PathBuf::from(path).join("workspace").to_str().unwrap().to_string();
-        std::fs::DirBuilder::new().recursive(true)
+        let workspace = std::path::PathBuf::from(path)
+            .join("workspace")
+            .to_str()
+            .unwrap()
+            .to_string();
+        std::fs::DirBuilder::new()
+            .recursive(true)
             .mode(0o700)
             .create(&workspace)
             .map_err(error::Error::IO)?;
         DurableStorage::recover_all(&topics_path)?;
         Ok(DurableStorage {
-            checkpoint: DurableCheckpoint {
-                seq: 0,
-                vars: HashMap::new(),
-            },
-            checkpoint_path: checkpoint_path,
-            topics: HashMap::new(),
-            topics_path: topics_path,
-            workspace: workspace,
-        })
+               checkpoint: DurableCheckpoint {
+                   seq: 0,
+                   vars: HashMap::new(),
+               },
+               checkpoint_path: checkpoint_path,
+               topics: HashMap::new(),
+               topics_path: topics_path,
+               workspace: workspace,
+           })
     }
 
     fn recover_all(path: &str) -> Result<()> {
@@ -315,15 +336,19 @@ impl Storage for DurableStorage {
                 seq: 0,
                 vars: HashMap::new(),
             };
-            debug!("DurableStorage.load: no checkpoint file! vars={:?}", &self.checkpoint.vars);
+            debug!("DurableStorage.load: no checkpoint file! vars={:?}",
+                   &self.checkpoint.vars);
             return Ok((self.checkpoint.seq, self.checkpoint.vars.clone()));
         }
         {
-            let chk_file = std::fs::OpenOptions::new().read(true)
+            let chk_file = std::fs::OpenOptions::new()
+                .read(true)
                 .open(&self.checkpoint_path)?;
-            self.checkpoint = serde_json::from_reader(chk_file).map_err(to_ioerror)
+            self.checkpoint = serde_json::from_reader(chk_file)
+                .map_err(to_ioerror)
                 .map_err(error::Error::IO)?;
-            debug!("DurableStorage.load: loaded checkpoint: {:?}", &self.checkpoint);
+            debug!("DurableStorage.load: loaded checkpoint: {:?}",
+                   &self.checkpoint);
             Ok((self.checkpoint.seq, self.checkpoint.vars.clone()))
         }
     }
@@ -332,18 +357,22 @@ impl Storage for DurableStorage {
         if seq < self.checkpoint.seq {
             return Err(error::Error::InvalidArgument("stale transaction".to_string()));
         }
-        debug!("DurableStorage.save: saving vars before={:?} after={:?}", &self.checkpoint.vars, &vars);
+        debug!("DurableStorage.save: saving vars before={:?} after={:?}",
+               &self.checkpoint.vars,
+               &vars);
         let chk = DurableCheckpoint {
             vars: vars,
             seq: seq + 1,
         };
         {
-            let mut chk_file = std::fs::OpenOptions::new().write(true)
+            let mut chk_file = std::fs::OpenOptions::new()
+                .write(true)
                 .mode(0o600)
                 .create(true)
                 .truncate(true)
                 .open(&self.checkpoint_path)?;
-            serde_json::to_writer(&mut chk_file, &chk).map_err(to_ioerror)
+            serde_json::to_writer(&mut chk_file, &chk)
+                .map_err(to_ioerror)
                 .map_err(error::Error::IO)?;
         }
         if !std::path::Path::new(&self.checkpoint_path).exists() {

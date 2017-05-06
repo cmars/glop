@@ -252,7 +252,7 @@ fn main() {
         Err(Error::CLI(e)) => {
             error!("{}", e);
             error!("{}", app_m.usage());
-            exit(64)  // EX_USAGE
+            exit(64) // EX_USAGE
         }
         Err(e) => {
             error!("{}", e);
@@ -277,9 +277,13 @@ fn cmd_server_init<'a>(_app_m: &ArgMatches<'a>) -> AppResult<()> {
     let mut server_token_st = agent::DurableTokenStorage::new(&server.tokens_path);
 
     let key = secretbox::gen_key();
-    let id = textnonce::TextNonce::sized_urlsafe(32).unwrap().into_string();
-    client.add_remote("local", server.addr, &id, key.clone())?;
-    server_token_st.add_token(agent::Token::Admin { id: id, key: key })?;
+    let id = textnonce::TextNonce::sized_urlsafe(32)
+        .unwrap()
+        .into_string();
+    client
+        .add_remote("local", server.addr, &id, key.clone())?;
+    server_token_st
+        .add_token(agent::Token::Admin { id: id, key: key })?;
     Ok(())
 }
 
@@ -289,10 +293,11 @@ fn cmd_server_token_add<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let mut server_token_st = agent::DurableTokenStorage::new(&server.tokens_path);
     let id = app_m.value_of("NAME").unwrap();
     let key = secretbox::gen_key();
-    server_token_st.add_token(agent::Token::Admin {
-            id: id.to_string(),
-            key: key.clone(),
-        })?;
+    server_token_st
+        .add_token(agent::Token::Admin {
+                       id: id.to_string(),
+                       key: key.clone(),
+                   })?;
     println!("{}", base64::encode(&key.0));
     Ok(())
 }
@@ -301,7 +306,8 @@ fn cmd_server_token_remove<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let server_home = server_home().map_err(Error::IO)?;
     let server = agent::Server::new("127.0.0.1:6709", &server_home)?;
     let mut server_token_st = agent::DurableTokenStorage::new(&server.tokens_path);
-    server_token_st.remove_token(app_m.value_of("NAME").unwrap())?;
+    server_token_st
+        .remove_token(app_m.value_of("NAME").unwrap())?;
     Ok(())
 }
 
@@ -330,11 +336,13 @@ fn cmd_run<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let mut st = runtime::State::new("main", runtime::MemStorage::new());
     st.mut_storage()
         .push_msg(value::Message::new("init", value::Obj::new())
-            .src("")
-            .src_role(None)
-            .dst("main"))?;
-    let m_excs =
-        glop.matches.iter().map(|m_ast| runtime::Match::new_from_ast(&m_ast)).collect::<Vec<_>>();
+                      .src_agent("user")
+                      .src_role(None)
+                      .dst_agent("main"))?;
+    let m_excs = glop.matches
+        .iter()
+        .map(|m_ast| runtime::Match::new_from_ast(&m_ast))
+        .collect::<Vec<_>>();
     loop {
         for m_exc in &m_excs {
             let mut txn = match st.eval(m_exc.clone()) {
@@ -362,7 +370,9 @@ fn cmd_getvar<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let req = runtime::ScriptRequest::GetVar { key: app_m.value_of("KEY").unwrap().to_string() };
     let proto = runtime::ScriptClientProto::new_from_env()?;
     let builder = TcpClient::new(proto);
-    let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
+    let resp = core.run(builder
+                            .connect(&addr, &handle)
+                            .and_then(|svc| svc.call(req)))
         .map_err(Error::IO)?;
     match resp {
         runtime::ScriptResponse::GetVar { key: _, ref value } => {
@@ -384,7 +394,9 @@ fn cmd_setvar<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     };
     let proto = runtime::ScriptClientProto::new_from_env()?;
     let builder = TcpClient::new(proto);
-    let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
+    let resp = core.run(builder
+                            .connect(&addr, &handle)
+                            .and_then(|svc| svc.call(req)))
         .map_err(Error::IO)?;
     match resp {
         runtime::ScriptResponse::SetVar { key: _, value: _ } => Ok(()),
@@ -400,7 +412,9 @@ fn cmd_unsetvar<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let req = runtime::ScriptRequest::UnsetVar { key: app_m.value_of("KEY").unwrap().to_string() };
     let proto = runtime::ScriptClientProto::new_from_env()?;
     let builder = TcpClient::new(proto);
-    let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
+    let resp = core.run(builder
+                            .connect(&addr, &handle)
+                            .and_then(|svc| svc.call(req)))
         .map_err(Error::IO)?;
     match resp {
         runtime::ScriptResponse::UnsetVar { key: _ } => Ok(()),
@@ -419,10 +433,16 @@ fn cmd_getmsg<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     };
     let proto = runtime::ScriptClientProto::new_from_env()?;
     let builder = TcpClient::new(proto);
-    let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
+    let resp = core.run(builder
+                            .connect(&addr, &handle)
+                            .and_then(|svc| svc.call(req)))
         .map_err(Error::IO)?;
     match resp {
-        runtime::ScriptResponse::GetMsg { topic: _, key: _, ref value } => {
+        runtime::ScriptResponse::GetMsg {
+            topic: _,
+            key: _,
+            ref value,
+        } => {
             println!("{}", value);
             Ok(())
         }
@@ -434,7 +454,8 @@ fn cmd_add<'a>(app_m: &ArgMatches<'a>, sub_m: &ArgMatches<'a>) -> AppResult<()> 
     let client_home = client_home()?;
     let client = agent::Client::new(&client_home)?;
     let contents = read_file(sub_m.value_of("SOURCE").unwrap())?;
-    let resp = client.call(app_m.value_of("REMOTE").unwrap(),
+    let resp = client
+        .call(app_m.value_of("REMOTE").unwrap(),
               agent::Request::Add {
                   contents: contents,
                   name: sub_m.value_of("NAME").unwrap().to_string(),
@@ -449,8 +470,10 @@ fn cmd_add<'a>(app_m: &ArgMatches<'a>, sub_m: &ArgMatches<'a>) -> AppResult<()> 
 fn cmd_remove<'a>(app_m: &ArgMatches<'a>, sub_m: &ArgMatches<'a>) -> AppResult<()> {
     let client_home = client_home()?;
     let client = agent::Client::new(&client_home)?;
-    let resp = client.call(app_m.value_of("REMOTE").unwrap(),
-              agent::Request::Remove { name: sub_m.value_of("NAME").unwrap().to_string() })?;
+    let resp =
+        client
+            .call(app_m.value_of("REMOTE").unwrap(),
+                  agent::Request::Remove { name: sub_m.value_of("NAME").unwrap().to_string() })?;
     match resp {
         agent::Response::Remove => Ok(()),
         agent::Response::Error(msg) => Err(Error::ErrorResponse(msg)),
@@ -461,7 +484,8 @@ fn cmd_remove<'a>(app_m: &ArgMatches<'a>, sub_m: &ArgMatches<'a>) -> AppResult<(
 fn cmd_list<'a>(app_m: &ArgMatches<'a>, _sub_m: &ArgMatches<'a>) -> AppResult<()> {
     let client_home = client_home()?;
     let client = agent::Client::new(&client_home)?;
-    let resp = client.call(app_m.value_of("REMOTE").unwrap(), agent::Request::List)?;
+    let resp = client
+        .call(app_m.value_of("REMOTE").unwrap(), agent::Request::List)?;
     match resp {
         agent::Response::List { ref names } => {
             for name in names {
@@ -478,22 +502,29 @@ fn cmd_send_agent<'a>(app_m: &ArgMatches<'a>, sub_m: &ArgMatches<'a>) -> AppResu
     let client_home = client_home()?;
     let client = agent::Client::new(&client_home)?;
     let contents = kv_map(sub_m.values_of("CONTENTS"));
-    let resp = client.call(app_m.value_of("REMOTE").unwrap(),
+    let resp = client
+        .call(app_m.value_of("REMOTE").unwrap(),
               agent::Request::SendTo(value::Message::new(sub_m.value_of("TOPIC").unwrap(),
                                                          value::Value::from_flat_map(contents))
-                  .src(if let Some(ref src) = sub_m.value_of("SOURCE") {
-                      src
-                  } else {
-                      "user"
-                  })
-                  .src_role(if let Some(ref role) = sub_m.value_of("ROLE") {
-                      Some(role.to_string())
-                  } else {
-                      None
-                  })
-                  .dst(sub_m.value_of("NAME").unwrap())))?;
+                                             .src_agent(if let Some(ref src) =
+            sub_m.value_of("SOURCE") {
+                                                            src
+                                                        } else {
+                                                            "user"
+                                                        })
+                                             .src_role(if let Some(ref role) =
+            sub_m.value_of("ROLE") {
+                                                           Some(role.to_string())
+                                                       } else {
+                                                           None
+                                                       })
+                                             .dst_agent(sub_m.value_of("NAME").unwrap())))?;
     match resp {
-        agent::Response::SendTo { id: _, src: _, dst: _ } => Ok(()),
+        agent::Response::SendTo {
+            id: _,
+            src_agent: _,
+            dst_agent: _,
+        } => Ok(()),
         agent::Response::Error(msg) => Err(Error::ErrorResponse(msg)),
         _ => Err(Error::BadResponse),
     }
@@ -503,7 +534,8 @@ fn cmd_introduce<'a>(app_m: &ArgMatches<'a>, sub_m: &ArgMatches<'a>) -> AppResul
     let client_home = client_home()?;
     let client = agent::Client::new(&client_home)?;
     let name_roles = name_roles(sub_m.values_of("NAME:ROLE"));
-    let resp = client.call(app_m.value_of("REMOTE").unwrap(),
+    let resp = client
+        .call(app_m.value_of("REMOTE").unwrap(),
               agent::Request::Introduce(name_roles))?;
     match resp {
         agent::Response::Introduce(ref results) => {
@@ -526,7 +558,8 @@ fn cmd_remote_add<'a>(sub_m: &ArgMatches<'a>) -> AppResult<()> {
         Some(ref token_id) => token_id,
         None => sub_m.value_of("NAME").unwrap(),
     };
-    client.add_remote_str(sub_m.value_of("NAME").unwrap(),
+    client
+        .add_remote_str(sub_m.value_of("NAME").unwrap(),
                         sub_m.value_of("ADDR").unwrap(),
                         id,
                         sub_m.value_of("TOKEN").unwrap())?;
@@ -557,16 +590,22 @@ fn cmd_send_script<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let addr = addr_str.parse().map_err(Error::AddrParse)?;
     let contents = kv_map(app_m.values_of("CONTENTS"));
     let req = runtime::ScriptRequest::SendMsg {
-        dst: app_m.value_of("NAME").unwrap().to_string(),
+        dst_agent: app_m.value_of("NAME").unwrap().to_string(),
         topic: app_m.value_of("TOPIC").unwrap().to_string(),
         contents: value::Value::from_flat_map(contents),
     };
     let proto = runtime::ScriptClientProto::new_from_env()?;
     let builder = TcpClient::new(proto);
-    let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
+    let resp = core.run(builder
+                            .connect(&addr, &handle)
+                            .and_then(|svc| svc.call(req)))
         .map_err(Error::IO)?;
     match resp {
-        runtime::ScriptResponse::SendMsg { dst: _, topic: _ } => Ok(()),
+        runtime::ScriptResponse::SendMsg {
+            dst_remote: _,
+            dst_agent: _,
+            topic: _,
+        } => Ok(()),
         _ => Err(Error::BadResponse),
     }
 }
@@ -584,10 +623,16 @@ fn cmd_reply_script<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     };
     let proto = runtime::ScriptClientProto::new_from_env()?;
     let builder = TcpClient::new(proto);
-    let resp = core.run(builder.connect(&addr, &handle).and_then(|svc| svc.call(req)))
+    let resp = core.run(builder
+                            .connect(&addr, &handle)
+                            .and_then(|svc| svc.call(req)))
         .map_err(Error::IO)?;
     match resp {
-        runtime::ScriptResponse::SendMsg { dst: _, topic: _ } => Ok(()),
+        runtime::ScriptResponse::SendMsg {
+            dst_remote: _,
+            dst_agent: _,
+            topic: _,
+        } => Ok(()),
         _ => Err(Error::BadResponse),
     }
 }
@@ -609,22 +654,26 @@ fn name_roles<'a>(maybe_args: Option<clap::Values<'a>>) -> Vec<agent::AgentRole>
         for nrpair in values {
             let nrs = nrpair.split(":").collect::<Vec<_>>();
             result.push(agent::AgentRole {
-                name: nrs[0].to_string(),
-                role: nrs[1].to_string(),
-            });
+                            name: nrs[0].to_string(),
+                            role: nrs[1].to_string(),
+                        });
         }
     }
     result
 }
 
 fn server_home() -> std::io::Result<String> {
-    let dirs = xdg::BaseDirectories::with_prefix(std::path::Path::new("glop")).map_err(to_ioerror)?;
-    let home = dirs.create_data_directory("server").map_err(to_ioerror)?;
+    let dirs = xdg::BaseDirectories::with_prefix(std::path::Path::new("glop"))
+        .map_err(to_ioerror)?;
+    let home = dirs.create_data_directory("server")
+        .map_err(to_ioerror)?;
     Ok(home.to_str().unwrap().to_string())
 }
 
 fn client_home() -> std::io::Result<String> {
-    let dirs = xdg::BaseDirectories::with_prefix(std::path::Path::new("glop")).map_err(to_ioerror)?;
-    let home = dirs.create_data_directory("client").map_err(to_ioerror)?;
+    let dirs = xdg::BaseDirectories::with_prefix(std::path::Path::new("glop"))
+        .map_err(to_ioerror)?;
+    let home = dirs.create_data_directory("client")
+        .map_err(to_ioerror)?;
     Ok(home.to_str().unwrap().to_string())
 }

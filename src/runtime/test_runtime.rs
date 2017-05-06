@@ -36,9 +36,9 @@ const NESTED_TWO_MSGS: &'static str = r#"when (message foo) {
 
 fn test_msg(topic: &str, contents: Obj) -> Message {
     Message::new(topic, contents)
-        .src("")
+        .src_agent("test_src")
         .src_role(None)
-        .dst("test")
+        .dst_agent("test_dst")
 }
 
 fn setup() {
@@ -65,7 +65,9 @@ fn durable_state() -> (State<DurableStorage>, cleanup::Cleanup) {
 }
 
 fn rand_string() -> String {
-    textnonce::TextNonce::sized_urlsafe(32).unwrap().into_string()
+    textnonce::TextNonce::sized_urlsafe(32)
+        .unwrap()
+        .into_string()
 }
 
 type StateFactory<T> = fn() -> (State<T>, cleanup::Cleanup);
@@ -115,9 +117,9 @@ fn matched_init_message<T: Storage>(f: StateFactory<T>) {
         Some(mut txn) => {
             assert_eq!(txn.seq, 0);
             txn.with_context(|ctx| {
-                assert!(ctx.msgs.contains_key("init"));
-                assert_eq!(ctx.msgs.len(), 1);
-            });
+                                 assert!(ctx.msgs.contains_key("init"));
+                                 assert_eq!(ctx.msgs.len(), 1);
+                             });
             txn
         }
         None => panic!("expected match"),
@@ -153,9 +155,9 @@ fn rollback_msg<T: Storage>(f: StateFactory<T>) {
         Some(mut txn) => {
             assert_eq!(txn.seq, 0);
             txn.with_context(|ctx| {
-                assert!(ctx.msgs.contains_key("init"));
-                assert_eq!(ctx.msgs.len(), 1);
-            });
+                                 assert!(ctx.msgs.contains_key("init"));
+                                 assert_eq!(ctx.msgs.len(), 1);
+                             });
             txn
         }
         None => panic!("expected match"),
@@ -167,9 +169,9 @@ fn rollback_msg<T: Storage>(f: StateFactory<T>) {
         Some(mut txn) => {
             assert_eq!(txn.seq, 0);
             txn.with_context(|ctx| {
-                assert!(ctx.msgs.contains_key("init"));
-                assert_eq!(ctx.msgs.len(), 1);
-            });
+                                 assert!(ctx.msgs.contains_key("init"));
+                                 assert_eq!(ctx.msgs.len(), 1);
+                             });
             txn
         }
         None => panic!("expected match"),
@@ -213,9 +215,9 @@ fn matched_only_init_message<T: Storage>(f: StateFactory<T>) {
         Some(mut txn) => {
             assert_eq!(txn.seq, 0);
             txn.with_context(|ref mut ctx| {
-                assert!(ctx.msgs.contains_key("init"));
-                assert_eq!(ctx.msgs.len(), 1);
-            });
+                                 assert!(ctx.msgs.contains_key("init"));
+                                 assert_eq!(ctx.msgs.len(), 1);
+                             });
             txn
         }
         None => panic!("expected match"),
@@ -243,10 +245,18 @@ fn matched_two_messages<T: Storage>(f: StateFactory<T>) {
     let (st, _cleanup) = f();
     let mut st = st;
     let m_ast = parse_one_match(TWO_MSGS);
-    st.mut_storage().push_msg(test_msg("foo", Obj::new())).unwrap();
-    st.mut_storage().push_msg(test_msg("bar", Obj::new())).unwrap();
-    st.mut_storage().push_msg(test_msg("foo", Obj::new())).unwrap();
-    st.mut_storage().push_msg(test_msg("bar", Obj::new())).unwrap();
+    st.mut_storage()
+        .push_msg(test_msg("foo", Obj::new()))
+        .unwrap();
+    st.mut_storage()
+        .push_msg(test_msg("bar", Obj::new()))
+        .unwrap();
+    st.mut_storage()
+        .push_msg(test_msg("foo", Obj::new()))
+        .unwrap();
+    st.mut_storage()
+        .push_msg(test_msg("bar", Obj::new()))
+        .unwrap();
     let m_exc = Match::new_from_ast(&m_ast);
 
     for i in 0..2 {
@@ -254,10 +264,10 @@ fn matched_two_messages<T: Storage>(f: StateFactory<T>) {
             Some(mut txn) => {
                 assert_eq!(txn.seq, i);
                 txn.with_context(|ref mut ctx| {
-                    assert!(ctx.msgs.contains_key("foo"));
-                    assert!(ctx.msgs.contains_key("bar"));
-                    assert_eq!(ctx.msgs.len(), 2);
-                });
+                                     assert!(ctx.msgs.contains_key("foo"));
+                                     assert!(ctx.msgs.contains_key("bar"));
+                                     assert_eq!(ctx.msgs.len(), 2);
+                                 });
                 txn
             }
             None => panic!("expected match"),
@@ -288,7 +298,10 @@ fn match_equal<T: Storage>(f: StateFactory<T>) {
         let mut st = st;
         st.mut_storage()
             .save(0,
-                  [("foo".to_string(), Value::from_str("bar"))].iter().cloned().collect())
+                  [("foo".to_string(), Value::from_str("bar"))]
+                      .iter()
+                      .cloned()
+                      .collect())
             .unwrap();
         let m_exc = Match::new_from_ast(&m_ast);
         let mut txn = match st.eval(m_exc.clone()).unwrap() {
@@ -310,7 +323,10 @@ fn match_equal<T: Storage>(f: StateFactory<T>) {
         let mut st = st;
         st.mut_storage()
             .save(0,
-                  [("foo".to_string(), Value::from_str("blah"))].iter().cloned().collect())
+                  [("foo".to_string(), Value::from_str("blah"))]
+                      .iter()
+                      .cloned()
+                      .collect())
             .unwrap();
         let m_exc = Match::new_from_ast(&m_ast);
         match st.eval(m_exc.clone()).unwrap() {
@@ -336,7 +352,10 @@ fn rollback_vars<T: Storage>(f: StateFactory<T>) {
     let mut st = st;
     st.mut_storage()
         .save(0,
-              [("foo".to_string(), Value::from_str("bar"))].iter().cloned().collect())
+              [("foo".to_string(), Value::from_str("bar"))]
+                  .iter()
+                  .cloned()
+                  .collect())
         .unwrap();
     let m_ast = parse_one_match(SIMPLE_EQUAL);
     let m_exc = Match::new_from_ast(&m_ast);
@@ -384,7 +403,10 @@ fn match_not_equal<T: Storage>(f: StateFactory<T>) {
         let mut st = st;
         st.mut_storage()
             .save(0,
-                  [("foo".to_string(), Value::from_str("blah"))].iter().cloned().collect())
+                  [("foo".to_string(), Value::from_str("blah"))]
+                      .iter()
+                      .cloned()
+                      .collect())
             .unwrap();
         let m_exc = Match::new_from_ast(&m_ast);
         match st.eval(m_exc.clone()).unwrap() {
@@ -399,7 +421,10 @@ fn match_not_equal<T: Storage>(f: StateFactory<T>) {
         let mut st = st;
         st.mut_storage()
             .save(0,
-                  [("foo".to_string(), Value::from_str("bar"))].iter().cloned().collect())
+                  [("foo".to_string(), Value::from_str("bar"))]
+                      .iter()
+                      .cloned()
+                      .collect())
             .unwrap();
         let m_exc = Match::new_from_ast(&m_ast);
         match st.eval(m_exc.clone()).unwrap() {
@@ -427,7 +452,10 @@ fn simple_commit_progression<T: Storage>(f: StateFactory<T>) {
     let mut st = st;
     st.mut_storage()
         .save(0,
-              [("foo".to_string(), Value::from_str("blah"))].iter().cloned().collect())
+              [("foo".to_string(), Value::from_str("blah"))]
+                  .iter()
+                  .cloned()
+                  .collect())
         .unwrap();
     // foo starts out != bar so we expect a match and apply
     let mut txn = match st.eval(m_exc_ne.clone()).unwrap() {
@@ -473,7 +501,10 @@ fn match_is_set<T: Storage>(f: StateFactory<T>) {
         let mut st = st;
         st.mut_storage()
             .save(0,
-                  [("foo".to_string(), Value::from_str("bar"))].iter().cloned().collect())
+                  [("foo".to_string(), Value::from_str("bar"))]
+                      .iter()
+                      .cloned()
+                      .collect())
             .unwrap();
         let m_exc = Match::new_from_ast(&m_ast);
         let mut txn = match st.eval(m_exc.clone()).unwrap() {
@@ -495,7 +526,10 @@ fn match_is_set<T: Storage>(f: StateFactory<T>) {
         let mut st = st;
         st.mut_storage()
             .save(0,
-                  [("bar".to_string(), Value::from_str("foo"))].iter().cloned().collect())
+                  [("bar".to_string(), Value::from_str("foo"))]
+                      .iter()
+                      .cloned()
+                      .collect())
             .unwrap();
         let m_exc = Match::new_from_ast(&m_ast);
         match st.eval(m_exc.clone()).unwrap() {
@@ -522,9 +556,15 @@ fn preserve_unmatched_message<T: Storage>(f: StateFactory<T>) {
     let m_exc_om = Match::new_from_ast(&parse_one_match(OTHER_MSG));
     let (st, _cleanup) = f();
     let mut st = st;
-    st.mut_storage().push_msg(test_msg("foo", Obj::new())).unwrap();
-    st.mut_storage().push_msg(test_msg("bar", Obj::new())).unwrap();
-    st.mut_storage().push_msg(test_msg("other", Obj::new())).unwrap();
+    st.mut_storage()
+        .push_msg(test_msg("foo", Obj::new()))
+        .unwrap();
+    st.mut_storage()
+        .push_msg(test_msg("bar", Obj::new()))
+        .unwrap();
+    st.mut_storage()
+        .push_msg(test_msg("other", Obj::new()))
+        .unwrap();
     // Doesn't match because baz is not set
     match st.eval(m_exc_tmis.clone()).unwrap() {
         Some(_) => panic!("unexpected match"),
@@ -532,7 +572,10 @@ fn preserve_unmatched_message<T: Storage>(f: StateFactory<T>) {
     };
     st.mut_storage()
         .save(0,
-              [("baz".to_string(), Value::from_str("blah"))].iter().cloned().collect())
+              [("baz".to_string(), Value::from_str("blah"))]
+                  .iter()
+                  .cloned()
+                  .collect())
         .unwrap();
     // Matches foo and bar messages with baz now set
     let mut txn = match st.eval(m_exc_tmis.clone()).unwrap() {
@@ -582,10 +625,15 @@ fn nested_cond<T: Storage>(f: StateFactory<T>) {
     let m_exc_nc = Match::new_from_ast(&parse_one_match(NESTED_COND));
     let (st, _cleanup) = f();
     let mut st = st;
-    st.mut_storage().push_msg(test_msg("foo", Obj::new())).unwrap();
+    st.mut_storage()
+        .push_msg(test_msg("foo", Obj::new()))
+        .unwrap();
     st.mut_storage()
         .save(0,
-              [("bar".to_string(), Value::from_str("blah"))].iter().cloned().collect())
+              [("bar".to_string(), Value::from_str("blah"))]
+                  .iter()
+                  .cloned()
+                  .collect())
         .unwrap();
     let mut txn = match st.eval(m_exc_nc.clone()).unwrap() {
         Some(txn) => {
@@ -595,7 +643,8 @@ fn nested_cond<T: Storage>(f: StateFactory<T>) {
         None => panic!("expected match"),
     };
     assert!(st.commit(&mut txn).is_ok());
-    assert_eq!(st.mut_storage().vars().get("found"), Some(&Value::from_str("true")));
+    assert_eq!(st.mut_storage().vars().get("found"),
+               Some(&Value::from_str("true")));
 }
 
 #[test]
@@ -613,11 +662,18 @@ fn nested_two_msgs<T: Storage>(f: StateFactory<T>) {
     let m_exc_ntm = Match::new_from_ast(&parse_one_match(NESTED_TWO_MSGS));
     let (st, _cleanup) = f();
     let mut st = st;
-    st.mut_storage().push_msg(test_msg("foo", Obj::new())).unwrap();
-    st.mut_storage().push_msg(test_msg("bar", Obj::new())).unwrap();
+    st.mut_storage()
+        .push_msg(test_msg("foo", Obj::new()))
+        .unwrap();
+    st.mut_storage()
+        .push_msg(test_msg("bar", Obj::new()))
+        .unwrap();
     st.mut_storage()
         .save(0,
-              [("look_at_bar".to_string(), Value::from_str("true"))].iter().cloned().collect())
+              [("look_at_bar".to_string(), Value::from_str("true"))]
+                  .iter()
+                  .cloned()
+                  .collect())
         .unwrap();
     let mut txn = match st.eval(m_exc_ntm.clone()).unwrap() {
         Some(txn) => {
@@ -627,12 +683,17 @@ fn nested_two_msgs<T: Storage>(f: StateFactory<T>) {
         None => panic!("expected match"),
     };
     assert!(st.commit(&mut txn).is_ok());
-    assert_eq!(st.storage().vars().get("found"), Some(&Value::from_str("true")));
+    assert_eq!(st.storage().vars().get("found"),
+               Some(&Value::from_str("true")));
 
     // Both messages present, bar match unset
-    st.mut_storage().push_msg(test_msg("foo", Obj::new())).unwrap();
-    st.mut_storage().push_msg(test_msg("bar", Obj::new())).unwrap();
-    st.mut_storage().save(2, HashMap::new()).unwrap();  // clear state vars
+    st.mut_storage()
+        .push_msg(test_msg("foo", Obj::new()))
+        .unwrap();
+    st.mut_storage()
+        .push_msg(test_msg("bar", Obj::new()))
+        .unwrap();
+    st.mut_storage().save(2, HashMap::new()).unwrap(); // clear state vars
     let mut txn = match st.eval(m_exc_ntm.clone()).unwrap() {
         Some(txn) => {
             assert_eq!(txn.seq, 3);
@@ -642,7 +703,8 @@ fn nested_two_msgs<T: Storage>(f: StateFactory<T>) {
     };
     assert!(st.commit(&mut txn).is_ok());
     assert_eq!(st.storage().vars().get("look_at_bar"), None);
-    assert_eq!(st.storage().vars().get("found"), Some(&Value::from_str("false")));
+    assert_eq!(st.storage().vars().get("found"),
+               Some(&Value::from_str("false")));
     // foo message was matched; bar message was unmatched
     let msgs = st.mut_storage()
         .next_messages(&[MessageFilter {
@@ -653,9 +715,9 @@ fn nested_two_msgs<T: Storage>(f: StateFactory<T>) {
                              topic: "foo".to_string(),
                              src_role: None,
                          }]
-            .iter()
-            .cloned()
-            .collect())
+                                .iter()
+                                .cloned()
+                                .collect())
         .unwrap();
     assert!(msgs.contains_key("bar"));
     assert!(!msgs.contains_key("foo"));

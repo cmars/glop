@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use self::futures::{Future, Stream, Sink};
 use self::futures::sync::mpsc;
 use self::itertools::Itertools;
-use self::tokio_io::{AsyncRead};
+use self::tokio_io::AsyncRead;
 use self::tokio_service::Service as TokioService;
 
 use super::*;
@@ -159,30 +159,36 @@ impl<S: AgentStorage + Send> Service<S> {
                    glop: &ast::Glop,
                    state: &mut ServiceState<S>)
                    -> Result<(), Error> {
-        let runtime_st = state.storage
+        let runtime_st = state
+            .storage
             .new_state(name,
                        Box::new(SenderOutbox {
-                           src: name.to_string(),
-                           remote: self.handle.remote().clone(),
-                           state: self.state.clone(),
-                       }) as Box<runtime::Outbox + Send>)?;
+                                    src_agent: name.to_string(),
+                                    remote: self.handle.remote().clone(),
+                                    state: self.state.clone(),
+                                }) as Box<runtime::Outbox + Send>)?;
         let (sender, receiver) = mpsc::channel(10);
         let agent = Agent::new(glop, runtime_st, receiver)?;
         state.local_senders.insert(name.to_string(), sender);
-        self.handle.spawn(self.pool
-            .spawn(agent.for_each(|_| Ok(()))
-                .or_else(|e| {
-                    error!("{}", e);
-                    Err(e)
-                })
-                .then(|_| Ok(()))));
+        self.handle
+            .spawn(self.pool
+                       .spawn(agent
+                                  .for_each(|_| Ok(()))
+                                  .or_else(|e| {
+                                               error!("{}", e);
+                                               Err(e)
+                                           })
+                                  .then(|_| Ok(()))));
         Ok(())
     }
 
     fn do_call(&self, req: Authenticated<Request>) -> Result<Response, Error> {
         debug!("request {:?}", &req);
         let res = match req.item {
-            Request::Add { contents: ref add_contents, name: ref add_name } => {
+            Request::Add {
+                contents: ref add_contents,
+                name: ref add_name,
+            } => {
                 let mut state = self.state.lock().unwrap();
                 if state.has_agent(add_name) {
                     return Ok(Response::Error(format!("agent {} already added", add_name)));
@@ -204,13 +210,13 @@ impl<S: AgentStorage + Send> Service<S> {
                 let mut result = vec![];
                 for ref p in agent_roles.iter().combinations(2) {
                     result.push(self.send_to(Message::new("intro", Obj::new())
-                        .src(&p[0].name)
-                        .src_role(Some(p[0].role.to_string()))
-                        .dst(&p[1].name)));
+                                                 .src_agent(&p[0].name)
+                                                 .src_role(Some(p[0].role.to_string()))
+                                                 .dst_agent(&p[1].name)));
                     result.push(self.send_to(Message::new("intro", Obj::new())
-                        .src(&p[1].name)
-                        .src_role(Some(p[1].role.to_string()))
-                        .dst(&p[0].name)));
+                                                 .src_agent(&p[1].name)
+                                                 .src_role(Some(p[1].role.to_string()))
+                                                 .dst_agent(&p[0].name)));
                 }
                 Response::Introduce(result)
             }
@@ -220,24 +226,28 @@ impl<S: AgentStorage + Send> Service<S> {
     }
 
     fn send_to(&self, msg: Message) -> Response {
-        if let Some(sender) = self.state.lock().unwrap().local_senders.get(&msg.dst) {
+        if let Some(sender) = self.state
+               .lock()
+               .unwrap()
+               .local_senders
+               .get(&msg.dst_agent) {
             let resp = Response::SendTo {
                 id: msg.id.to_string(),
-                src: msg.src.to_string(),
-                dst: msg.dst.to_string(),
+                src_agent: msg.src_agent.to_string(),
+                dst_agent: msg.dst_agent.to_string(),
             };
             let sender = sender.clone();
             self.handle.spawn(sender.send(msg).then(|_| Ok(())));
             resp
         } else {
-            Response::Error(format!("agent {} not found", &msg.dst))
+            Response::Error(format!("agent {} not found", &msg.dst_agent))
         }
     }
 }
 
 #[derive(Clone)]
 struct SenderOutbox<S: AgentStorage + Send + 'static> {
-    src: String,
+    src_agent: String,
     remote: tokio_core::reactor::Remote,
     state: Arc<Mutex<ServiceState<S>>>,
 }
@@ -245,9 +255,9 @@ struct SenderOutbox<S: AgentStorage + Send + 'static> {
 impl<S: AgentStorage + Send> runtime::Outbox for SenderOutbox<S> {
     fn send_msg(&self, msg: Message) -> Result<(), Error> {
         let state = self.state.lock().unwrap();
-        let sender = match state.local_senders.get(&msg.dst) {
+        let sender = match state.local_senders.get(&msg.dst_agent) {
             Some(s) => s.clone(),
-            None => return Err(Error::InvalidArgument(msg.dst.to_string())),
+            None => return Err(Error::InvalidArgument(msg.dst_agent.to_string())),
         };
         self.remote.spawn(|_| sender.send(msg).then(|_| Ok(())));
         Ok(())
@@ -313,7 +323,7 @@ impl SecureServiceCodec {
                 }
                 Err(e) => Err(to_ioerror(e)),
             }
-        } else if buf.len() > TOKEN_NAME_LEN+1 {
+        } else if buf.len() > TOKEN_NAME_LEN + 1 {
             Err(std::io::Error::new(std::io::ErrorKind::Other, "missing or invalid prelude"))
         } else {
             Ok(None)
@@ -340,9 +350,9 @@ impl tokio_io::codec::Decoder for SecureServiceCodec {
                 Ok(Some(req)) => {
                     buf.take();
                     Ok(Some(Authenticated {
-                        auth_id: id.to_string(),
-                        item: req,
-                    }))
+                                auth_id: id.to_string(),
+                                item: req,
+                            }))
                 }
                 Ok(None) => Ok(None),
                 Err(e) => Err(e),
@@ -380,43 +390,47 @@ impl Server {
     }
 
     pub fn new_addr(addr: std::net::SocketAddr, path: &str) -> Result<Server, Error> {
-        std::fs::DirBuilder::new().recursive(true)
+        std::fs::DirBuilder::new()
+            .recursive(true)
             .mode(0o700)
             .create(path)
             .map_err(Error::IO)?;
         Ok(Server {
-            addr: addr,
-            agents_path: std::path::PathBuf::from(path)
-                .join("agents")
-                .to_str()
-                .unwrap()
-                .to_string(),
-            tokens_path: std::path::PathBuf::from(path)
-                .join("tokens.json")
-                .to_str()
-                .unwrap()
-                .to_string(),
-        })
+               addr: addr,
+               agents_path: std::path::PathBuf::from(path)
+                   .join("agents")
+                   .to_str()
+                   .unwrap()
+                   .to_string(),
+               tokens_path: std::path::PathBuf::from(path)
+                   .join("tokens.json")
+                   .to_str()
+                   .unwrap()
+                   .to_string(),
+           })
     }
 
     pub fn run(&self) -> Result<(), Error> {
         let mut core = tokio_core::reactor::Core::new().map_err(Error::IO)?;
         let handle = core.handle();
-        let listener = tokio_core::net::TcpListener::bind(&self.addr, &handle).map_err(Error::IO)?;
+        let listener = tokio_core::net::TcpListener::bind(&self.addr, &handle)
+            .map_err(Error::IO)?;
         info!("server listening on {}", self.addr);
         let connections = listener.incoming();
         let agent_storage = DurableAgentStorage::new(&self.agents_path);
         let service = Service::new(agent_storage, &handle)?;
         let server = connections.for_each(move |(socket, _peer_addr)| {
             let token_storage = DurableTokenStorage::new(&self.tokens_path);
-            let (wr, rd) = socket.framed(SecureServiceCodec::new(Box::new(token_storage))).split();
+            let (wr, rd) = socket
+                .framed(SecureServiceCodec::new(Box::new(token_storage)))
+                .split();
             let service = service.clone();
             let responses = rd.and_then(move |req| service.call(req));
             let responder = wr.send_all(responses)
                 .or_else(|e| {
-                    error!("{}", e);
-                    Err(e)
-                })
+                             error!("{}", e);
+                             Err(e)
+                         })
                 .then(|_| Ok(()));
             handle.spawn(responder);
             Ok(())
