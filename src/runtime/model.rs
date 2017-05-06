@@ -157,6 +157,7 @@ pub enum Action {
         dst_remote: Option<String>,
         dst_agent: String,
         topic: String,
+        in_reply_to: Option<String>,
         contents: Obj,
     },
     ReplyTo { topic: String, contents: Obj },

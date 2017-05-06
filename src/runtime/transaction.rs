@@ -55,6 +55,7 @@ impl Transaction {
                     dst_remote: _,
                     dst_agent: _,
                     topic: _,
+                    in_reply_to: _,
                     contents: _,
                 } => vec![action],
                 Action::ReplyTo {
@@ -68,6 +69,7 @@ impl Transaction {
                                      dst_agent: subject.src_agent.to_string(),
                                      dst_remote: subject.src_remote.clone(),
                                      topic: topic.to_string(),
+                                     in_reply_to: subject.in_reply_to.clone(),
                                      contents: contents.clone(),
                                  }]
                         }

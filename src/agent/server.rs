@@ -205,7 +205,7 @@ impl<S: AgentStorage + Send> Service<S> {
                 let state = self.state.lock().unwrap();
                 Response::List { names: state.local_senders.keys().cloned().collect() }
             }
-            Request::SendTo(msg) => self.send_to(msg.new_id()),
+            Request::SendTo(msg) => self.send_to(msg.src_remote(&req.auth_id)),
             Request::Introduce(agent_roles) => {
                 let mut result = vec![];
                 for ref p in agent_roles.iter().combinations(2) {

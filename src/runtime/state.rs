@@ -104,13 +104,15 @@ impl<S: Storage> State<S> {
                      ref dst_remote,
                      ref dst_agent,
                      ref topic,
+                     ref in_reply_to,
                      ref contents,
                  } => {
                     let msg = Message::new(topic, contents.clone())
                         .src_agent(&self.name)
                         .src_role(txn.m.acting_role.clone())
                         .dst_agent(dst_agent)
-                        .dst_remote(dst_remote.clone());
+                        .dst_remote(dst_remote.clone())
+                        .in_reply_to(in_reply_to.clone());
                     debug!("send {:?}", msg);
                     if dst_agent == "self" {
                         self_msgs.push(msg);

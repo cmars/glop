@@ -299,6 +299,7 @@ impl Service for ScriptService {
                                  dst_remote: None,
                                  dst_agent: dst_agent.to_string(),
                                  topic: topic.to_string(),
+                                 in_reply_to: None,
                                  contents: contents.clone(),
                              });
                 drop(actions);
@@ -319,6 +320,7 @@ impl Service for ScriptService {
                                      dst_remote: src_msg.src_remote.clone(),
                                      dst_agent: src_msg.src_agent.to_string(),
                                      topic: topic.to_string(),
+                                     in_reply_to: Some(src_msg.id.to_string()),
                                      contents: contents.clone(),
                                  });
                     drop(actions);
