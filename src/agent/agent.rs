@@ -1,4 +1,5 @@
 extern crate futures;
+extern crate itertools;
 extern crate serde_json;
 extern crate spoolq;
 
@@ -97,6 +98,11 @@ pub trait AgentStorage {
     fn remove_agent(&mut self, name: &str) -> Result<(), Error>;
     fn agents(&self) -> Result<HashMap<String, ast::Glop>, Error>;
     fn push_remote_msg(&mut self, msg: Message) -> Result<(), Error>;
+    fn fetch_remote_reply(&mut self,
+                          remote_id: &str,
+                          in_reply_to: &str)
+                          -> Result<Option<Message>, Error>;
+    fn fetch_remote_msgs(&mut self, remote_id: &str) -> Result<Vec<Message>, Error>;
 }
 
 #[derive(Clone)]
@@ -151,6 +157,33 @@ impl AgentStorage for MemAgentStorage {
             msgs.push(msg);
         }
         Ok(())
+    }
+
+    fn fetch_remote_reply(&mut self,
+                          remote_id: &str,
+                          in_reply_to: &str)
+                          -> Result<Option<Message>, Error> {
+        match self.remote_msgs.get_mut(remote_id) {
+            Some(ref mut msgs) => {
+                if let Some(pos) = msgs.iter()
+                       .position(|msg| if let Some(ref reply_id) = msg.in_reply_to {
+                                     in_reply_to == reply_id
+                                 } else {
+                                     false
+                                 }) {
+                    return Ok(Some(msgs.remove(pos)));
+                }
+                Ok(None)
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn fetch_remote_msgs(&mut self, remote_id: &str) -> Result<Vec<Message>, Error> {
+        match self.remote_msgs.get_mut(remote_id) {
+            Some(ref mut msgs) => Ok(msgs.drain(..).collect()),
+            None => Ok(vec![]),
+        }
     }
 }
 
@@ -250,5 +283,28 @@ impl AgentStorage for DurableAgentStorage {
             return q.push(msg).map_err(Error::IO);
         }
         Ok(())
+    }
+
+    fn fetch_remote_reply(&mut self,
+                          remote_id: &str,
+                          in_reply_to: &str)
+                          -> Result<Option<Message>, Error> {
+        match self.remote_msgs.get(remote_id) {
+            Some(ref q) => {
+                q.pop_filter(|msg| match msg.in_reply_to {
+                                    Some(ref reply_id) => reply_id == in_reply_to,
+                                    _ => false,
+                                })
+                    .map_err(Error::IO)
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn fetch_remote_msgs(&mut self, remote_id: &str) -> Result<Vec<Message>, Error> {
+        match self.remote_msgs.get(remote_id) {
+            Some(ref q) => q.drain().map_err(Error::IO),
+            None => Ok(vec![]),
+        }
     }
 }

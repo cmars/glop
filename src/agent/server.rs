@@ -220,6 +220,18 @@ impl<S: AgentStorage + Send> Service<S> {
                 }
                 Response::Introduce(result)
             }
+            Request::FetchReply { ref in_reply_to } => {
+                let mut state = self.state.lock().unwrap();
+                let maybe_msg = state
+                    .storage
+                    .fetch_remote_reply(&req.auth_id, in_reply_to)?;
+                Response::FetchReply(maybe_msg)
+            }
+            Request::FetchMsgs => {
+                let mut state = self.state.lock().unwrap();
+                let msgs = state.storage.fetch_remote_msgs(&req.auth_id)?;
+                Response::FetchMsgs(msgs)
+            }
         };
         debug!("response {:?}", res);
         Ok(res)
