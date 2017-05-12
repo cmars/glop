@@ -159,36 +159,31 @@ impl<S: AgentStorage + Send> Service<S> {
                    glop: &ast::Glop,
                    state: &mut ServiceState<S>)
                    -> Result<(), Error> {
-        let runtime_st = state
-            .storage
+        let runtime_st = state.storage
             .new_state(name,
                        Box::new(SenderOutbox {
-                                    src_agent: name.to_string(),
-                                    remote: self.handle.remote().clone(),
-                                    state: self.state.clone(),
-                                }) as Box<runtime::Outbox + Send>)?;
+                           src_agent: name.to_string(),
+                           remote: self.handle.remote().clone(),
+                           state: self.state.clone(),
+                       }) as Box<runtime::Outbox + Send>)?;
         let (sender, receiver) = mpsc::channel(10);
         let agent = Agent::new(glop, runtime_st, receiver)?;
         state.local_senders.insert(name.to_string(), sender);
         self.handle
             .spawn(self.pool
-                       .spawn(agent
-                                  .for_each(|_| Ok(()))
-                                  .or_else(|e| {
-                                               error!("{}", e);
-                                               Err(e)
-                                           })
-                                  .then(|_| Ok(()))));
+                .spawn(agent.for_each(|_| Ok(()))
+                    .or_else(|e| {
+                        error!("{}", e);
+                        Err(e)
+                    })
+                    .then(|_| Ok(()))));
         Ok(())
     }
 
     fn do_call(&self, req: Authenticated<Request>) -> Result<Response, Error> {
         debug!("request {:?}", &req);
         let res = match req.item {
-            Request::Add {
-                contents: ref add_contents,
-                name: ref add_name,
-            } => {
+            Request::Add { contents: ref add_contents, name: ref add_name } => {
                 let mut state = self.state.lock().unwrap();
                 if state.has_agent(add_name) {
                     return Ok(Response::Error(format!("agent {} already added", add_name)));
@@ -210,20 +205,19 @@ impl<S: AgentStorage + Send> Service<S> {
                 let mut result = vec![];
                 for ref p in agent_roles.iter().combinations(2) {
                     result.push(self.send_to(Message::new("intro", Obj::new())
-                                                 .src_agent(&p[0].name)
-                                                 .src_role(Some(p[0].role.to_string()))
-                                                 .dst_agent(&p[1].name)));
+                        .src_agent(&p[0].name)
+                        .src_role(Some(p[0].role.to_string()))
+                        .dst_agent(&p[1].name)));
                     result.push(self.send_to(Message::new("intro", Obj::new())
-                                                 .src_agent(&p[1].name)
-                                                 .src_role(Some(p[1].role.to_string()))
-                                                 .dst_agent(&p[0].name)));
+                        .src_agent(&p[1].name)
+                        .src_role(Some(p[1].role.to_string()))
+                        .dst_agent(&p[0].name)));
                 }
                 Response::Introduce(result)
             }
             Request::FetchReply { ref in_reply_to } => {
                 let mut state = self.state.lock().unwrap();
-                let maybe_msg = state
-                    .storage
+                let maybe_msg = state.storage
                     .fetch_remote_reply(&req.auth_id, in_reply_to)?;
                 Response::FetchReply(maybe_msg)
             }
@@ -239,10 +233,10 @@ impl<S: AgentStorage + Send> Service<S> {
 
     fn send_to(&self, msg: Message) -> Response {
         if let Some(sender) = self.state
-               .lock()
-               .unwrap()
-               .local_senders
-               .get(&msg.dst_agent) {
+            .lock()
+            .unwrap()
+            .local_senders
+            .get(&msg.dst_agent) {
             let resp = Response::SendTo {
                 id: msg.id.to_string(),
                 src_agent: msg.src_agent.to_string(),
@@ -367,9 +361,9 @@ impl tokio_io::codec::Decoder for SecureServiceCodec {
                 Ok(Some(req)) => {
                     buf.take();
                     Ok(Some(Authenticated {
-                                auth_id: id.to_string(),
-                                item: req,
-                            }))
+                        auth_id: id.to_string(),
+                        item: req,
+                    }))
                 }
                 Ok(None) => Ok(None),
                 Err(e) => Err(e),
@@ -407,47 +401,45 @@ impl Server {
     }
 
     pub fn new_addr(addr: std::net::SocketAddr, path: &str) -> Result<Server, Error> {
-        std::fs::DirBuilder::new()
-            .recursive(true)
+        std::fs::DirBuilder::new().recursive(true)
             .mode(0o700)
             .create(path)
             .map_err(Error::IO)?;
         Ok(Server {
-               addr: addr,
-               agents_path: std::path::PathBuf::from(path)
-                   .join("agents")
-                   .to_str()
-                   .unwrap()
-                   .to_string(),
-               tokens_path: std::path::PathBuf::from(path)
-                   .join("tokens.json")
-                   .to_str()
-                   .unwrap()
-                   .to_string(),
-           })
+            addr: addr,
+            agents_path: std::path::PathBuf::from(path)
+                .join("agents")
+                .to_str()
+                .unwrap()
+                .to_string(),
+            tokens_path: std::path::PathBuf::from(path)
+                .join("tokens.json")
+                .to_str()
+                .unwrap()
+                .to_string(),
+        })
     }
 
     pub fn run(&self) -> Result<(), Error> {
         let mut core = tokio_core::reactor::Core::new().map_err(Error::IO)?;
         let handle = core.handle();
-        let listener = tokio_core::net::TcpListener::bind(&self.addr, &handle)
-            .map_err(Error::IO)?;
-        info!("server listening on {}", self.addr);
+        let listener = tokio_core::net::TcpListener::bind(&self.addr, &handle).map_err(Error::IO)?;
+        let local_addr = listener.local_addr().map_err(Error::IO)?;
+        info!("server listening on {}", local_addr);
         let connections = listener.incoming();
         let agent_storage = DurableAgentStorage::new(&self.agents_path);
         let service = Service::new(agent_storage, &handle)?;
         let server = connections.for_each(move |(socket, _peer_addr)| {
             let token_storage = DurableTokenStorage::new(&self.tokens_path);
-            let (wr, rd) = socket
-                .framed(SecureServiceCodec::new(Box::new(token_storage)))
+            let (wr, rd) = socket.framed(SecureServiceCodec::new(Box::new(token_storage)))
                 .split();
             let service = service.clone();
             let responses = rd.and_then(move |req| service.call(req));
             let responder = wr.send_all(responses)
                 .or_else(|e| {
-                             error!("{}", e);
-                             Err(e)
-                         })
+                    error!("{}", e);
+                    Err(e)
+                })
                 .then(|_| Ok(()));
             handle.spawn(responder);
             Ok(())
