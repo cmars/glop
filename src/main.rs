@@ -130,129 +130,146 @@ fn main() {
                 .arg(Arg::with_name("CONTENTS").index(3).multiple(true).required(false)))
             .subcommand(SubCommand::with_name("recv")
                 .about("receive messages from agents")
-                .arg(Arg::with_name("IN_REPLY_TO").index(1))));
+                .arg(Arg::with_name("IN_REPLY_TO").index(1)))
+            .subcommand(SubCommand::with_name("call")
+                .about("make a remote procedure call to an agent")
+                .arg(Arg::with_name("SOURCE").short("s").long("src").takes_value(true))
+                .arg(Arg::with_name("ROLE").short("r").long("role").takes_value(true))
+                .arg(Arg::with_name("TIMEOUT")
+                    .short("w")
+                    .long("timeout")
+                    .default_value("100")
+                    .validator(|v| {
+                        v.parse::<u32>().map_err(|e| e.to_string())?;
+                        Ok(())
+                    }))
+                .arg(Arg::with_name("NAME").index(1).required(true))
+                .arg(Arg::with_name("TOPIC").index(2).required(true))
+                .arg(Arg::with_name("CONTENTS").index(3).multiple(true).required(false))));
     let app_m = app.get_matches();
-    let result =
-        match app_m.subcommand_name() {
-            Some("server") => {
-                let sub_m = app_m.subcommand_matches("server").unwrap();
-                match sub_m.subcommand_name() {
-                    Some("init") => cmd_server_init(sub_m.subcommand_matches("init").unwrap()),
-                    Some("token") => {
-                        let sub_m = sub_m.subcommand_matches("token").unwrap();
-                        match sub_m.subcommand_name() {
-                            Some("add") => {
-                                cmd_server_token_add(sub_m.subcommand_matches("add").unwrap())
-                            }
-                            Some("remove") => {
-                                cmd_server_token_remove(sub_m.subcommand_matches("remove").unwrap())
-                            }
-                            Some("list") => {
-                                cmd_server_token_list(sub_m.subcommand_matches("list").unwrap())
-                            }
-                            Some(subcmd) => {
-                                error!("unsupported command {}", subcmd);
-                                Err(Error::CLI(clap::Error::with_description("unsupported command",
-                                                             clap::ErrorKind::HelpDisplayed)))
-                            }
-                            None => Err(Error::CLI(clap::Error::with_description("missing subcommand",
-                                                         clap::ErrorKind::HelpDisplayed))),
+    let result = match app_m.subcommand_name() {
+        Some("server") => {
+            let sub_m = app_m.subcommand_matches("server").unwrap();
+            match sub_m.subcommand_name() {
+                Some("init") => cmd_server_init(sub_m.subcommand_matches("init").unwrap()),
+                Some("token") => {
+                    let sub_m = sub_m.subcommand_matches("token").unwrap();
+                    match sub_m.subcommand_name() {
+                        Some("add") => {
+                            cmd_server_token_add(sub_m.subcommand_matches("add").unwrap())
                         }
-                    }
-                    Some("run") => cmd_server_run(sub_m.subcommand_matches("run").unwrap()),
-                    Some(subcmd) => {
-                        error!("unsupported command {}", subcmd);
-                        Err(Error::CLI(clap::Error::with_description("unsupported command",
+                        Some("remove") => {
+                            cmd_server_token_remove(sub_m.subcommand_matches("remove").unwrap())
+                        }
+                        Some("list") => {
+                            cmd_server_token_list(sub_m.subcommand_matches("list").unwrap())
+                        }
+                        Some(subcmd) => {
+                            error!("unsupported command {}", subcmd);
+                            Err(Error::CLI(clap::Error::with_description("unsupported command",
                                                              clap::ErrorKind::HelpDisplayed)))
-                    }
-                    None => Err(Error::CLI(clap::Error::with_description("missing subcommand",
+                        }
+                        None => Err(Error::CLI(clap::Error::with_description("missing subcommand",
                                                          clap::ErrorKind::HelpDisplayed))),
+                    }
+                }
+                Some("run") => cmd_server_run(sub_m.subcommand_matches("run").unwrap()),
+                Some(subcmd) => {
+                    error!("unsupported command {}", subcmd);
+                    Err(Error::CLI(clap::Error::with_description("unsupported command",
+                                                                 clap::ErrorKind::HelpDisplayed)))
+                }
+                None => {
+                    Err(Error::CLI(clap::Error::with_description("missing subcommand",
+                                                                 clap::ErrorKind::HelpDisplayed)))
                 }
             }
-            Some("remote") => {
-                let sub_m = app_m.subcommand_matches("remote").unwrap();
-                match sub_m.subcommand_name() {
-                    Some("add") => cmd_remote_add(sub_m.subcommand_matches("add").unwrap()),
-                    Some("remove") => {
-                        cmd_remote_remove(sub_m.subcommand_matches("remove").unwrap())
-                    }
-                    Some("list") => cmd_remote_list(sub_m.subcommand_matches("list").unwrap()),
-                    Some(subcmd) => {
-                        error!("unsupported command {}", subcmd);
-                        Err(Error::CLI(clap::Error::with_description("unsupported command",
-                                                             clap::ErrorKind::HelpDisplayed)))
-                    }
-                    None => Err(Error::CLI(clap::Error::with_description("missing subcommand",
-                                                         clap::ErrorKind::HelpDisplayed))),
+        }
+        Some("remote") => {
+            let sub_m = app_m.subcommand_matches("remote").unwrap();
+            match sub_m.subcommand_name() {
+                Some("add") => cmd_remote_add(sub_m.subcommand_matches("add").unwrap()),
+                Some("remove") => cmd_remote_remove(sub_m.subcommand_matches("remove").unwrap()),
+                Some("list") => cmd_remote_list(sub_m.subcommand_matches("list").unwrap()),
+                Some(subcmd) => {
+                    error!("unsupported command {}", subcmd);
+                    Err(Error::CLI(clap::Error::with_description("unsupported command",
+                                                                 clap::ErrorKind::HelpDisplayed)))
+                }
+                None => {
+                    Err(Error::CLI(clap::Error::with_description("missing subcommand",
+                                                                 clap::ErrorKind::HelpDisplayed)))
                 }
             }
-            Some("run") => cmd_run(app_m.subcommand_matches("run").unwrap()),
-            Some("var") => {
-                let sub_m = app_m.subcommand_matches("var").unwrap();
-                match sub_m.subcommand_name() {
-                    Some("get") => cmd_getvar(sub_m.subcommand_matches("get").unwrap()),
-                    Some("set") => cmd_setvar(sub_m.subcommand_matches("set").unwrap()),
-                    Some("unset") => cmd_unsetvar(sub_m.subcommand_matches("unset").unwrap()),
-                    Some(subcmd) => {
-                        error!("unsupported command {}", subcmd);
-                        Err(Error::CLI(clap::Error::with_description("unsupported command",
-                                                             clap::ErrorKind::HelpDisplayed)))
-                    }
-                    None => Err(Error::CLI(clap::Error::with_description("missing subcommand",
-                                                         clap::ErrorKind::HelpDisplayed))),
+        }
+        Some("run") => cmd_run(app_m.subcommand_matches("run").unwrap()),
+        Some("var") => {
+            let sub_m = app_m.subcommand_matches("var").unwrap();
+            match sub_m.subcommand_name() {
+                Some("get") => cmd_getvar(sub_m.subcommand_matches("get").unwrap()),
+                Some("set") => cmd_setvar(sub_m.subcommand_matches("set").unwrap()),
+                Some("unset") => cmd_unsetvar(sub_m.subcommand_matches("unset").unwrap()),
+                Some(subcmd) => {
+                    error!("unsupported command {}", subcmd);
+                    Err(Error::CLI(clap::Error::with_description("unsupported command",
+                                                                 clap::ErrorKind::HelpDisplayed)))
+                }
+                None => {
+                    Err(Error::CLI(clap::Error::with_description("missing subcommand",
+                                                                 clap::ErrorKind::HelpDisplayed)))
                 }
             }
-            Some("msg") => {
-                let sub_m = app_m.subcommand_matches("msg").unwrap();
-                match sub_m.subcommand_name() {
-                    Some("get") => cmd_getmsg(sub_m.subcommand_matches("get").unwrap()),
-                    Some("send") => cmd_send_script(sub_m.subcommand_matches("send").unwrap()),
-                    Some("reply") => cmd_reply_script(sub_m.subcommand_matches("reply").unwrap()),
-                    Some(subcmd) => {
-                        error!("unsupported command {}", subcmd);
-                        Err(Error::CLI(clap::Error::with_description("unsupported command",
-                                                             clap::ErrorKind::HelpDisplayed)))
-                    }
-                    None => Err(Error::CLI(clap::Error::with_description("missing subcommand",
-                                                         clap::ErrorKind::HelpDisplayed))),
+        }
+        Some("msg") => {
+            let sub_m = app_m.subcommand_matches("msg").unwrap();
+            match sub_m.subcommand_name() {
+                Some("get") => cmd_getmsg(sub_m.subcommand_matches("get").unwrap()),
+                Some("send") => cmd_send_script(sub_m.subcommand_matches("send").unwrap()),
+                Some("reply") => cmd_reply_script(sub_m.subcommand_matches("reply").unwrap()),
+                Some(subcmd) => {
+                    error!("unsupported command {}", subcmd);
+                    Err(Error::CLI(clap::Error::with_description("unsupported command",
+                                                                 clap::ErrorKind::HelpDisplayed)))
+                }
+                None => {
+                    Err(Error::CLI(clap::Error::with_description("missing subcommand",
+                                                                 clap::ErrorKind::HelpDisplayed)))
                 }
             }
-            Some("agent") => {
-                let sub_m = app_m.subcommand_matches("agent").unwrap();
-                match sub_m.subcommand_name() {
-                    Some("add") => cmd_add(sub_m, sub_m.subcommand_matches("add").unwrap()),
-                    Some("remove") => {
-                        cmd_remove(sub_m, sub_m.subcommand_matches("remove").unwrap())
-                    }
-                    Some("list") => cmd_list(sub_m, sub_m.subcommand_matches("list").unwrap()),
-                    Some("send") => {
-                        cmd_send_agent(sub_m, sub_m.subcommand_matches("send").unwrap())
-                    }
-                    Some("recv") => {
-                        cmd_recv_agent(sub_m, sub_m.subcommand_matches("recv").unwrap())
-                    }
-                    Some("introduce") => {
-                        cmd_introduce(sub_m, sub_m.subcommand_matches("introduce").unwrap())
-                    }
-                    Some(subcmd) => {
-                        error!("unsupported command {}", subcmd);
-                        Err(Error::CLI(clap::Error::with_description("unsupported command",
-                                                             clap::ErrorKind::HelpDisplayed)))
-                    }
-                    None => Err(Error::CLI(clap::Error::with_description("missing subcommand",
-                                                         clap::ErrorKind::HelpDisplayed))),
+        }
+        Some("agent") => {
+            let sub_m = app_m.subcommand_matches("agent").unwrap();
+            match sub_m.subcommand_name() {
+                Some("add") => cmd_add(sub_m, sub_m.subcommand_matches("add").unwrap()),
+                Some("remove") => cmd_remove(sub_m, sub_m.subcommand_matches("remove").unwrap()),
+                Some("list") => cmd_list(sub_m, sub_m.subcommand_matches("list").unwrap()),
+                Some("send") => cmd_send_agent(sub_m, sub_m.subcommand_matches("send").unwrap()),
+                Some("recv") => cmd_recv_agent(sub_m, sub_m.subcommand_matches("recv").unwrap()),
+                Some("call") => cmd_call_agent(sub_m, sub_m.subcommand_matches("call").unwrap()),
+                Some("introduce") => {
+                    cmd_introduce(sub_m, sub_m.subcommand_matches("introduce").unwrap())
+                }
+                Some(subcmd) => {
+                    error!("unsupported command {}", subcmd);
+                    Err(Error::CLI(clap::Error::with_description("unsupported command",
+                                                                 clap::ErrorKind::HelpDisplayed)))
+                }
+                None => {
+                    Err(Error::CLI(clap::Error::with_description("missing subcommand",
+                                                                 clap::ErrorKind::HelpDisplayed)))
                 }
             }
-            Some(subcmd) => {
-                error!("unsupported command {}", subcmd);
-                Err(Error::CLI(clap::Error::with_description("unsupported command",
-                                                             clap::ErrorKind::HelpDisplayed)))
-            }
-            None => {
-                Err(Error::CLI(clap::Error::with_description("missing subcommand",
-                                                             clap::ErrorKind::HelpDisplayed)))
-            }
-        };
+        }
+        Some(subcmd) => {
+            error!("unsupported command {}", subcmd);
+            Err(Error::CLI(clap::Error::with_description("unsupported command",
+                                                         clap::ErrorKind::HelpDisplayed)))
+        }
+        None => {
+            Err(Error::CLI(clap::Error::with_description("missing subcommand",
+                                                         clap::ErrorKind::HelpDisplayed)))
+        }
+    };
     match result {
         Ok(_) => exit(0),
         Err(Error::CLI(e)) => {
@@ -491,6 +508,15 @@ fn cmd_list<'a>(app_m: &ArgMatches<'a>, _sub_m: &ArgMatches<'a>) -> AppResult<()
 fn cmd_send_agent<'a>(app_m: &ArgMatches<'a>, sub_m: &ArgMatches<'a>) -> AppResult<()> {
     let client_home = client_home()?;
     let client = agent::Client::new(&client_home)?;
+    let msg_id = send_agent(&client, app_m, sub_m)?;
+    println!("{}", msg_id);
+    Ok(())
+}
+
+fn send_agent<'a>(client: &agent::Client,
+                  app_m: &ArgMatches<'a>,
+                  sub_m: &ArgMatches<'a>)
+                  -> AppResult<String> {
     let contents = kv_map(sub_m.values_of("CONTENTS"));
     let msg = value::Message::new(sub_m.value_of("TOPIC").unwrap(),
                                   value::Value::from_flat_map(contents))
@@ -509,13 +535,10 @@ fn cmd_send_agent<'a>(app_m: &ArgMatches<'a>, sub_m: &ArgMatches<'a>) -> AppResu
     let msg_id = msg.id.clone();
     let resp = client.call(remote, agent::Request::SendTo(msg))?;
     match resp {
-        agent::Response::SendTo { id: _, src_agent: _, dst_agent: _ } => {
-            println!("{}", msg_id);
-        }
-        agent::Response::Error(msg) => return Err(Error::ErrorResponse(msg)),
-        _ => return Err(Error::BadResponse),
+        agent::Response::SendTo { id: _, src_agent: _, dst_agent: _ } => Ok(msg_id),
+        agent::Response::Error(msg) => Err(Error::ErrorResponse(msg)),
+        _ => Err(Error::BadResponse),
     }
-    Ok(())
 }
 
 fn cmd_recv_agent<'a>(app_m: &ArgMatches<'a>, sub_m: &ArgMatches<'a>) -> AppResult<()> {
@@ -535,6 +558,35 @@ fn cmd_recv_agent<'a>(app_m: &ArgMatches<'a>, sub_m: &ArgMatches<'a>) -> AppResu
         _ => return Err(Error::BadResponse),
     }
     Ok(())
+}
+
+fn cmd_call_agent<'a>(app_m: &ArgMatches<'a>, sub_m: &ArgMatches<'a>) -> AppResult<()> {
+    let client_home = client_home()?;
+    let client = agent::Client::new(&client_home)?;
+    let timeout = sub_m.value_of("TIMEOUT")
+        .unwrap()
+        .parse::<u32>()
+        .map_err(|e| Error::InvalidArgument(e.to_string()))?;
+    let msg_id = send_agent(&client, app_m, sub_m)?;
+    let remote = app_m.value_of("REMOTE").unwrap();
+    for _ in {
+        0..timeout
+    } {
+        let req = agent::Request::FetchReply { in_reply_to: msg_id.to_string() };
+        let resp = client.call(remote, req)?;
+        match resp {
+            agent::Response::FetchReply(Some(ref msg)) => {
+                println!("{:?}", msg);
+                return Ok(());
+            }
+            agent::Response::FetchReply(None) => {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
+            agent::Response::Error(msg) => return Err(Error::ErrorResponse(msg)),
+            _ => return Err(Error::BadResponse),
+        };
+    }
+    Err(Error::Timeout)
 }
 
 fn cmd_introduce<'a>(app_m: &ArgMatches<'a>, sub_m: &ArgMatches<'a>) -> AppResult<()> {

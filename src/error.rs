@@ -21,6 +21,7 @@ pub enum Error {
     UnsupportedAction,
     AgentExists(String),
     UndeliverableMessage(String),
+    Timeout,
 }
 
 impl From<clap::Error> for Error {
@@ -75,6 +76,7 @@ impl std::fmt::Display for Error {
             Error::UnsupportedAction => write!(f, "unsupported action"),
             Error::AgentExists(ref name) => write!(f, "agent {} already added", name),
             Error::UndeliverableMessage(ref dst) => write!(f, "undeliverable message: {}", dst),
+            Error::Timeout => write!(f, "timeout"),
         }
     }
 }
@@ -95,6 +97,7 @@ impl std::error::Error for Error {
             Error::UnsupportedAction => "unsupported action",
             Error::AgentExists(ref name) => name,
             Error::UndeliverableMessage(ref dst) => dst,
+            Error::Timeout => "timeout",
         }
     }
 
