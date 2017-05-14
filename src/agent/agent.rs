@@ -34,11 +34,11 @@ impl<S: runtime::Storage> Agent<S> {
             .map(|m_ast| runtime::Match::new_from_ast(&m_ast))
             .collect::<Vec<_>>();
         Ok(Agent {
-               matches: m_excs,
-               st: st,
-               receiver: receiver,
-               match_index: 0,
-           })
+            matches: m_excs,
+            st: st,
+            receiver: receiver,
+            match_index: 0,
+        })
     }
 
     fn poll_matches(&mut self) -> futures::Poll<Option<()>, Error> {
@@ -166,11 +166,11 @@ impl AgentStorage for MemAgentStorage {
         match self.remote_msgs.get_mut(remote_id) {
             Some(ref mut msgs) => {
                 if let Some(pos) = msgs.iter()
-                       .position(|msg| if let Some(ref reply_id) = msg.in_reply_to {
-                                     in_reply_to == reply_id
-                                 } else {
-                                     false
-                                 }) {
+                    .position(|msg| if let Some(ref reply_id) = msg.in_reply_to {
+                        in_reply_to == reply_id
+                    } else {
+                        false
+                    }) {
                     return Ok(Some(msgs.remove(pos)));
                 }
                 Ok(None)
@@ -211,24 +211,21 @@ impl DurableAgentStorage {
         if !std::path::PathBuf::from(&self.agents_json_path).exists() {
             return Ok(HashMap::new());
         }
-        let agents_file = std::fs::OpenOptions::new()
-            .read(true)
+        let agents_file = std::fs::OpenOptions::new().read(true)
             .open(&self.agents_json_path)?;
-        let agents: HashMap<String, ast::Glop> = serde_json::from_reader(agents_file)
-            .map_err(to_ioerror)
-            .map_err(Error::IO)?;
+        let agents: HashMap<String, ast::Glop> =
+            serde_json::from_reader(agents_file).map_err(to_ioerror)
+                .map_err(Error::IO)?;
         Ok(agents)
     }
 
     fn save_agents(&self, agents: HashMap<String, ast::Glop>) -> Result<(), Error> {
-        let mut agents_file = std::fs::OpenOptions::new()
-            .write(true)
+        let mut agents_file = std::fs::OpenOptions::new().write(true)
             .mode(0o600)
             .create(true)
             .truncate(true)
             .open(&self.agents_json_path)?;
-        serde_json::to_writer(&mut agents_file, &agents)
-            .map_err(to_ioerror)
+        serde_json::to_writer(&mut agents_file, &agents).map_err(to_ioerror)
             .map_err(Error::IO)?;
         Ok(())
     }
@@ -273,10 +270,10 @@ impl AgentStorage for DurableAgentStorage {
         if let Some(ref dst_target) = msg.dst_remote.clone() {
             if !self.remote_msgs.contains_key(dst_target) {
                 let q = spoolq::Queue::<Message>::new(std::path::PathBuf::from(&self.path)
-                                                          .join("remote_msgs")
-                                                          .to_str()
-                                                          .unwrap())
-                        .map_err(Error::IO)?;
+                        .join("remote_msgs")
+                        .join(dst_target)
+                        .to_str()
+                        .unwrap()).map_err(Error::IO)?;
                 self.remote_msgs.insert(dst_target.to_string(), q);
             }
             let q = self.remote_msgs.get_mut(dst_target).unwrap();
@@ -289,12 +286,25 @@ impl AgentStorage for DurableAgentStorage {
                           remote_id: &str,
                           in_reply_to: &str)
                           -> Result<Option<Message>, Error> {
+        if !self.remote_msgs.contains_key(remote_id) {
+            let q = spoolq::Queue::<Message>::new(std::path::PathBuf::from(&self.path)
+                    .join("remote_msgs")
+                    .join(remote_id)
+                    .to_str()
+                    .unwrap()).map_err(Error::IO)?;
+            self.remote_msgs.insert(remote_id.to_string(), q);
+        }
         match self.remote_msgs.get(remote_id) {
             Some(ref q) => {
-                q.pop_filter(|msg| match msg.in_reply_to {
-                                    Some(ref reply_id) => reply_id == in_reply_to,
-                                    _ => false,
-                                })
+                q.pop_filter(|msg| {
+                        match msg.in_reply_to {
+                            Some(ref reply_id) => {
+                                debug!("trying to match {} {}", reply_id, in_reply_to,);
+                                reply_id == in_reply_to
+                            }
+                            _ => false,
+                        }
+                    })
                     .map_err(Error::IO)
             }
             None => Ok(None),
@@ -302,6 +312,14 @@ impl AgentStorage for DurableAgentStorage {
     }
 
     fn fetch_remote_msgs(&mut self, remote_id: &str) -> Result<Vec<Message>, Error> {
+        if !self.remote_msgs.contains_key(remote_id) {
+            let q = spoolq::Queue::<Message>::new(std::path::PathBuf::from(&self.path)
+                    .join("remote_msgs")
+                    .join(remote_id)
+                    .to_str()
+                    .unwrap()).map_err(Error::IO)?;
+            self.remote_msgs.insert(remote_id.to_string(), q);
+        }
         match self.remote_msgs.get(remote_id) {
             Some(ref q) => q.drain().map_err(Error::IO),
             None => Ok(vec![]),
