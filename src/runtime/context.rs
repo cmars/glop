@@ -26,14 +26,6 @@ impl Context {
     }
 
     pub fn set_env(&self, cmd: &mut Command) {
-        for (k, v) in Value::to_env(&self.vars) {
-            cmd.env(k, v);
-        }
-        for (topic, msg) in &self.msgs {
-            for (k, v) in Value::to_env(&msg.contents) {
-                cmd.env(vec![topic.clone(), k.to_string()].join("__"), v);
-            }
-        }
         let path = std::env::var_os("PATH").unwrap_or(std::ffi::OsString::new());
         let exe_path = std::env::current_exe().unwrap();
         let exec_dir = std::path::Path::new(&exe_path).parent().unwrap();

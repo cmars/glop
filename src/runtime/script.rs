@@ -183,8 +183,8 @@ pub struct ClientProto {
 impl ClientProto {
     pub fn new_from_env() -> Result<ClientProto> {
         let key_str = std::env::var("GLOP_SCRIPT_KEY").map_err(Error::Env)?;
-        let key_bytes = base64::decode(&key_str)
-            .map_err(|e| Error::InvalidArgument(format!("{}", e)))?;
+        let key_bytes =
+            base64::decode(&key_str).map_err(|e| Error::InvalidArgument(format!("{}", e)))?;
         let key = match secretbox::Key::from_slice(&key_bytes) {
             Some(k) => k,
             None => return Err(Error::InvalidArgument("GLOP_SCRIPT_KEY".to_string())),
@@ -288,20 +288,16 @@ impl Service for ScriptService {
                     }
                 }
             }
-            Request::SendMsg {
-                ref dst_agent,
-                ref topic,
-                ref contents,
-            } => {
+            Request::SendMsg { ref dst_agent, ref topic, ref contents } => {
                 drop(ctx);
                 let mut actions = self.actions.lock().unwrap();
                 actions.push(Action::SendMsg {
-                                 dst_remote: None,
-                                 dst_agent: dst_agent.to_string(),
-                                 topic: topic.to_string(),
-                                 in_reply_to: None,
-                                 contents: contents.clone(),
-                             });
+                    dst_remote: None,
+                    dst_agent: dst_agent.to_string(),
+                    topic: topic.to_string(),
+                    in_reply_to: None,
+                    contents: contents.clone(),
+                });
                 drop(actions);
                 Response::SendMsg {
                     dst_remote: None,
@@ -309,20 +305,16 @@ impl Service for ScriptService {
                     topic: topic.to_string(),
                 }
             }
-            Request::ReplyMsg {
-                ref src_topic,
-                ref topic,
-                ref contents,
-            } => {
+            Request::ReplyMsg { ref src_topic, ref topic, ref contents } => {
                 if let Some(ref src_msg) = ctx.msgs.get(src_topic) {
                     let mut actions = self.actions.lock().unwrap();
                     actions.push(Action::SendMsg {
-                                     dst_remote: src_msg.src_remote.clone(),
-                                     dst_agent: src_msg.src_agent.to_string(),
-                                     topic: topic.to_string(),
-                                     in_reply_to: Some(src_msg.id.to_string()),
-                                     contents: contents.clone(),
-                                 });
+                        dst_remote: src_msg.src_remote.clone(),
+                        dst_agent: src_msg.src_agent.to_string(),
+                        topic: topic.to_string(),
+                        in_reply_to: Some(src_msg.id.to_string()),
+                        contents: contents.clone(),
+                    });
                     drop(actions);
                     Response::SendMsg {
                         dst_remote: src_msg.src_remote.clone(),
@@ -339,13 +331,11 @@ impl Service for ScriptService {
 }
 
 pub fn run_script(ctx: Arc<Mutex<Context>>, script_path: &str) -> Result<Vec<Action>> {
-    let mut core = tokio_core::reactor::Core::new()
-        .map_err(error::Error::IO)?;
+    let mut core = tokio_core::reactor::Core::new().map_err(error::Error::IO)?;
     let handle = core.handle();
 
     let addr = "127.0.0.1:0".parse().unwrap();
-    let listener = tokio_core::net::TcpListener::bind(&addr, &handle)
-        .map_err(error::Error::IO)?;
+    let listener = tokio_core::net::TcpListener::bind(&addr, &handle).map_err(error::Error::IO)?;
     let listen_addr = &listener.local_addr().map_err(error::Error::IO)?;
     let connections = listener.incoming();
     let mut cmd = &mut Command::new(script_path);
@@ -361,33 +351,31 @@ pub fn run_script(ctx: Arc<Mutex<Context>>, script_path: &str) -> Result<Vec<Act
         .env("GLOP_SCRIPT_KEY", base64::encode(&key.0))
         .output_async(&handle)
         .then(|result| match result {
-                  Ok(output) => {
-            let mut stdout = String::from_utf8(output.stdout).unwrap();
-            stdout.pop();
-            if !stdout.is_empty() {
-                info!("{}: stdout: {}", src, stdout);
+            Ok(output) => {
+                let mut stdout = String::from_utf8(output.stdout).unwrap();
+                stdout.pop();
+                if !stdout.is_empty() {
+                    info!("{}: stdout: {}", src, stdout);
+                }
+                let mut stderr = String::from_utf8(output.stderr).unwrap();
+                stderr.pop();
+                if !stderr.is_empty() {
+                    info!("{}: stderr: {}", src, stderr);
+                }
+                if output.status.success() {
+                    Ok(())
+                } else {
+                    let code = match output.status.code() {
+                        Some(value) => value,
+                        None => 0,
+                    };
+                    Err(Error::Exec(code, stderr))
+                }
             }
-            let mut stderr = String::from_utf8(output.stderr).unwrap();
-            stderr.pop();
-            if !stderr.is_empty() {
-                info!("{}: stderr: {}", src, stderr);
-            }
-            if output.status.success() {
-                Ok(())
-            } else {
-                let code = match output.status.code() {
-                    Some(value) => value,
-                    None => 0,
-                };
-                Err(Error::Exec(code, stderr))
-            }
-        }
-                  Err(e) => Err(Error::IO(e)),
-              });
-    let server = connections
-        .for_each(move |(socket, _peer_addr)| {
-            let (wr, rd) = socket
-                .framed(crypto::SecretBoxCodec::new(ServiceCodec, key.clone()))
+            Err(e) => Err(Error::IO(e)),
+        });
+    let server = connections.for_each(move |(socket, _peer_addr)| {
+            let (wr, rd) = socket.framed(crypto::SecretBoxCodec::new(ServiceCodec, key.clone()))
                 .split();
             let service = ScriptService::new(ctx.clone(), server_actions.clone());
             let responses = rd.and_then(move |req| service.call(req));

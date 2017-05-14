@@ -67,19 +67,19 @@ impl Value {
         }
     }
 
-    pub fn to_env(o: &Obj) -> Env {
-        Value::to_env_prefix(o, "").into_iter().collect()
+    pub fn to_flat_map(o: &Obj) -> FlatMap {
+        Value::to_flat_map_prefix(o, "").into_iter().collect()
     }
 
-    fn to_env_prefix(o: &Obj, prefix: &str) -> Vec<(String, String)> {
+    fn to_flat_map_prefix(o: &Obj, prefix: &str) -> Vec<(String, String)> {
         o.iter()
             .map(|(k, v)| {
                 let fqprefix = match prefix {
                     "" => k.to_string(),
-                    _ => vec![prefix, k].join("__").to_string(),
+                    _ => vec![prefix, k].join(".").to_string(),
                 };
                 match v {
-                    &Value::Object(ref child) => Value::to_env_prefix(child, &fqprefix),
+                    &Value::Object(ref child) => Value::to_flat_map_prefix(child, &fqprefix),
                     _ => vec![(fqprefix.clone(), v.to_string())],
                 }
             })
@@ -178,8 +178,8 @@ impl Message {
     }
 }
 
-/// Environment variable settings.
-pub type Env = HashMap<String, String>;
+/// FlatMap describes a structured object as flattened key-value pairs.
+pub type FlatMap = HashMap<String, String>;
 
 #[derive(Serialize, Deserialize)]
 #[derive(Clone, Debug)]
