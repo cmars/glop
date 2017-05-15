@@ -1,0 +1,4 @@
+when (message ping) #!/bin/bash
+set -e
+glop msg reply ping pong time=$(date +%s)
+!#
