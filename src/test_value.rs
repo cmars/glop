@@ -127,17 +127,17 @@ fn unset_parent_exist() {
 }
 
 #[test]
-fn test_to_env() {
+fn test_to_flat_map() {
     let o = &mut test_obj();
     Identifier::from_str("apple.color.r").set(o, Value::from_int(255));
     Identifier::from_str("apple.color.g").set(o, Value::from_int(0));
     Identifier::from_str("apple.color.b").set(o, Value::from_int(0));
-    let e = Value::to_env(o);
+    let e = Value::to_flat_map(o);
     assert_eq!(e.get("pi").unwrap(), "3.14");
-    assert_eq!(e.get("apple__color__r").unwrap(), "255");
-    assert_eq!(e.get("apple__color__g").unwrap(), "0");
-    assert_eq!(e.get("apple__color__b").unwrap(), "0");
-    assert_eq!(e.get("apple__size").unwrap(), "4");
+    assert_eq!(e.get("apple.color.r").unwrap(), "255");
+    assert_eq!(e.get("apple.color.g").unwrap(), "0");
+    assert_eq!(e.get("apple.color.b").unwrap(), "0");
+    assert_eq!(e.get("apple.size").unwrap(), "4");
     assert_eq!(Identifier::from_str("apple.size").get(&o),
                Some(&Value::from_int(4)))
 }
