@@ -24,16 +24,17 @@ use self::tokio_service::Service;
 
 use super::*;
 use self::context::Context;
-use self::value::{Identifier, Obj, Value};
+use self::value::{Identifier, Message, Obj};
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug)]
 pub enum Request {
-    GetVar { key: String },
-    SetVar { key: String, value: String },
+    GetVars,
+    SetVars { contents: Obj },
     UnsetVar { key: String },
-    GetMsg { topic: String, key: String },
+    GetMsg { topic: String },
     SendMsg {
+        dst_remote: Option<String>,
         dst_agent: String,
         topic: String,
         contents: Obj,
@@ -48,19 +49,16 @@ pub enum Request {
 #[derive(Serialize, Deserialize)]
 #[derive(Debug)]
 pub enum Response {
-    GetVar { key: String, value: String },
-    SetVar { key: String, value: String },
-    UnsetVar { key: String },
-    GetMsg {
-        topic: String,
-        key: String,
-        value: String,
-    },
+    GetVars(Obj),
+    SetVars,
+    UnsetVar,
+    GetMsg(Message),
     SendMsg {
         dst_remote: Option<String>,
         dst_agent: String,
         topic: String,
     },
+    NotFound,
     Error(String),
 }
 
@@ -233,33 +231,17 @@ impl Service for ScriptService {
     fn call(&self, req: Self::Request) -> Self::Future {
         let mut ctx = self.ctx.lock().unwrap();
         let res = match req {
-            Request::GetVar { ref key } => {
-                match ctx.get_var(&Identifier::from_str(key)) {
-                    Some(ref value) => {
-                        Response::GetVar {
-                            key: key.to_string(),
-                            value: value.to_string(),
-                        }
-                    }
-                    None => {
-                        Response::GetVar {
-                            key: key.to_string(),
-                            value: "".to_string(),
-                        }
-                    }
-                }
-            }
-            Request::SetVar { ref key, ref value } => {
-                let id = Identifier::from_str(key);
-                ctx.set_var(&id, Value::from_str(value));
-                drop(ctx);
+            Request::GetVars => Response::GetVars(ctx.vars.clone()),
+            Request::SetVars { ref contents } => {
                 let mut actions = self.actions.lock().unwrap();
-                actions.push(Action::SetVar(id, value.to_string()));
-                drop(actions);
-                Response::SetVar {
-                    key: key.to_string(),
-                    value: value.to_string(),
+                for (k, v) in contents.iter() {
+                    let id = Identifier::from_str(k);
+                    ctx.set_var(&id, v.clone());
+                    actions.push(Action::SetVar(id, v.clone()));
                 }
+                drop(ctx);
+                drop(actions);
+                Response::SetVars
             }
             Request::UnsetVar { ref key } => {
                 let id = Identifier::from_str(key);
@@ -268,31 +250,19 @@ impl Service for ScriptService {
                 let mut actions = self.actions.lock().unwrap();
                 actions.push(Action::UnsetVar(id));
                 drop(actions);
-                Response::UnsetVar { key: key.to_string() }
+                Response::UnsetVar
             }
-            Request::GetMsg { ref topic, ref key } => {
-                match ctx.get_msg(topic, &Identifier::from_str(key)) {
-                    Some(ref value) => {
-                        Response::GetMsg {
-                            topic: topic.to_string(),
-                            key: key.to_string(),
-                            value: value.to_string(),
-                        }
-                    }
-                    None => {
-                        Response::GetMsg {
-                            topic: topic.to_string(),
-                            key: key.to_string(),
-                            value: "".to_string(),
-                        }
-                    }
+            Request::GetMsg { ref topic } => {
+                match ctx.msgs.get(topic) {
+                    Some(msg) => Response::GetMsg(msg.clone()),
+                    None => Response::NotFound,
                 }
             }
-            Request::SendMsg { ref dst_agent, ref topic, ref contents } => {
+            Request::SendMsg { ref dst_remote, ref dst_agent, ref topic, ref contents } => {
                 drop(ctx);
                 let mut actions = self.actions.lock().unwrap();
                 actions.push(Action::SendMsg {
-                    dst_remote: None,
+                    dst_remote: dst_remote.clone(),
                     dst_agent: dst_agent.to_string(),
                     topic: topic.to_string(),
                     in_reply_to: None,
@@ -300,7 +270,7 @@ impl Service for ScriptService {
                 });
                 drop(actions);
                 Response::SendMsg {
-                    dst_remote: None,
+                    dst_remote: dst_remote.clone(),
                     dst_agent: dst_agent.to_string(),
                     topic: topic.to_string(),
                 }

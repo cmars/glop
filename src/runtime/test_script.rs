@@ -31,9 +31,10 @@ set -e
 [ -n "$GLOP_SCRIPT_ADDR" ]
 [ -n "$GLOP_SCRIPT_KEY" ]
 
-FOO=$(cargo run var get foo)
+cargo run var get
+FOO=$(cargo run var get | awk -F= '/foo=/ {print $2}')
 [ "${FOO}" = "bar" ]
-cargo run var set foo hello-${FOO}
+cargo run var set foo=hello-${FOO}
 !#
 }
 "###;
@@ -45,11 +46,11 @@ set -e
 [ -n "$GLOP_SCRIPT_KEY" ]
 
 # glop msg get init foo
-FOO=$(cargo run msg get init foo)
+FOO=$(cargo run msg get init | awk -F= '/contents.foo/ {print $2}')
 [ "${FOO}" = "bar" ]
 
 # glop var set all good
-cargo run var set all good
+cargo run var set all=good
 !#
 }
 "###;

@@ -68,13 +68,10 @@ fn main() {
             .arg(Arg::with_name("GLOPFILE").index(1).multiple(true).required(true)))
         .subcommand(SubCommand::with_name("var")
             .about("access variables from glop runtime")
-            .subcommand(SubCommand::with_name("get")
-                .about("display value of variable")
-                .arg(Arg::with_name("KEY").index(1).required(true)))
+            .subcommand(SubCommand::with_name("get").about("display value of variable"))
             .subcommand(SubCommand::with_name("set")
-                .about("set value of variable")
-                .arg(Arg::with_name("KEY").index(1).required(true))
-                .arg(Arg::with_name("VALUE").index(2).required(true)))
+                .about("set value of variable(s)")
+                .arg(Arg::with_name("CONTENTS").index(1).multiple(true).required(false)))
             .subcommand(SubCommand::with_name("unset")
                 .about("unset variable")
                 .arg(Arg::with_name("KEY").index(1).required(true))))
@@ -82,8 +79,7 @@ fn main() {
             .about("access messages from glop runtime")
             .subcommand(SubCommand::with_name("get")
                 .about("get value of message")
-                .arg(Arg::with_name("TOPIC").index(1).required(true))
-                .arg(Arg::with_name("KEY").index(2).required(true)))
+                .arg(Arg::with_name("TOPIC").index(1).required(true)))
             .subcommand(SubCommand::with_name("send")
                 .about("send a message to an agent")
                 .arg(Arg::with_name("ROLE").short("r").long("role").takes_value(true))
@@ -381,20 +377,22 @@ fn cmd_run<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     }
 }
 
-fn cmd_getvar<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
+fn cmd_getvar<'a>(_app_m: &ArgMatches<'a>) -> AppResult<()> {
     let mut core = tokio_core::reactor::Core::new().map_err(Error::IO)?;
     let handle = core.handle();
     let addr_str = std::env::var("GLOP_SCRIPT_ADDR").map_err(Error::Env)?;
     let addr = addr_str.parse().map_err(Error::AddrParse)?;
-    let req = runtime::ScriptRequest::GetVar { key: app_m.value_of("KEY").unwrap().to_string() };
+    let req = runtime::ScriptRequest::GetVars;
     let proto = runtime::ScriptClientProto::new_from_env()?;
     let builder = TcpClient::new(proto);
     let resp = core.run(builder.connect(&addr, &handle)
             .and_then(|svc| svc.call(req)))
         .map_err(Error::IO)?;
     match resp {
-        runtime::ScriptResponse::GetVar { key: _, ref value } => {
-            println!("{}", value);
+        runtime::ScriptResponse::GetVars(ref obj) => {
+            for (k, v) in value::Value::to_flat_map(obj) {
+                println!("{}={}", k, v);
+            }
             Ok(())
         }
         _ => Err(Error::BadResponse),
@@ -406,17 +404,15 @@ fn cmd_setvar<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let handle = core.handle();
     let addr_str = std::env::var("GLOP_SCRIPT_ADDR").map_err(Error::Env)?;
     let addr = addr_str.parse().map_err(Error::AddrParse)?;
-    let req = runtime::ScriptRequest::SetVar {
-        key: app_m.value_of("KEY").unwrap().to_string(),
-        value: app_m.value_of("VALUE").unwrap().to_string(),
-    };
+    let contents = kv_map(app_m.values_of("CONTENTS"));
+    let req = runtime::ScriptRequest::SetVars { contents: value::Value::from_flat_map(contents) };
     let proto = runtime::ScriptClientProto::new_from_env()?;
     let builder = TcpClient::new(proto);
     let resp = core.run(builder.connect(&addr, &handle)
             .and_then(|svc| svc.call(req)))
         .map_err(Error::IO)?;
     match resp {
-        runtime::ScriptResponse::SetVar { key: _, value: _ } => Ok(()),
+        runtime::ScriptResponse::SetVars => Ok(()),
         _ => Err(Error::BadResponse),
     }
 }
@@ -433,7 +429,7 @@ fn cmd_unsetvar<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
             .and_then(|svc| svc.call(req)))
         .map_err(Error::IO)?;
     match resp {
-        runtime::ScriptResponse::UnsetVar { key: _ } => Ok(()),
+        runtime::ScriptResponse::UnsetVar => Ok(()),
         _ => Err(Error::BadResponse),
     }
 }
@@ -443,18 +439,18 @@ fn cmd_getmsg<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let handle = core.handle();
     let addr_str = std::env::var("GLOP_SCRIPT_ADDR").map_err(Error::Env)?;
     let addr = addr_str.parse().map_err(Error::AddrParse)?;
-    let req = runtime::ScriptRequest::GetMsg {
-        topic: app_m.value_of("TOPIC").unwrap().to_string(),
-        key: app_m.value_of("KEY").unwrap().to_string(),
-    };
+    let req =
+        runtime::ScriptRequest::GetMsg { topic: app_m.value_of("TOPIC").unwrap().to_string() };
     let proto = runtime::ScriptClientProto::new_from_env()?;
     let builder = TcpClient::new(proto);
     let resp = core.run(builder.connect(&addr, &handle)
             .and_then(|svc| svc.call(req)))
         .map_err(Error::IO)?;
     match resp {
-        runtime::ScriptResponse::GetMsg { topic: _, key: _, ref value } => {
-            println!("{}", value);
+        runtime::ScriptResponse::GetMsg(ref msg) => {
+            for (k, v) in msg.flat_map() {
+                println!("{}={}", k, v);
+            }
             Ok(())
         }
         _ => Err(Error::BadResponse),
@@ -647,6 +643,10 @@ fn cmd_send_script<'a>(app_m: &ArgMatches<'a>) -> AppResult<()> {
     let addr = addr_str.parse().map_err(Error::AddrParse)?;
     let contents = kv_map(app_m.values_of("CONTENTS"));
     let req = runtime::ScriptRequest::SendMsg {
+        dst_remote: match app_m.value_of("REMOTE") {
+            Some(ref remote) => Some(remote.to_string()),
+            None => None,
+        },
         dst_agent: app_m.value_of("NAME").unwrap().to_string(),
         topic: app_m.value_of("TOPIC").unwrap().to_string(),
         contents: value::Value::from_flat_map(contents),
@@ -689,6 +689,7 @@ fn kv_map<'a>(maybe_args: Option<clap::Values<'a>>) -> HashMap<String, String> {
     if let Some(values) = maybe_args {
         for kvpair in values {
             let kvs = kvpair.split("=").collect::<Vec<_>>();
+            // TODO: deal with case where there's a missing '='
             result.insert(kvs[0].to_string(), kvs[1].to_string());
         }
     }

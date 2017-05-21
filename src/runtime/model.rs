@@ -29,27 +29,21 @@ impl Match {
 
     pub fn new_from_ast(m_ast: &ast::Match) -> Match {
         let mut m_exc = Match::new();
-        m_exc.conditions = m_ast
-            .conditions
+        m_exc.conditions = m_ast.conditions
             .iter()
             .map(|c_ast| {
-                if let &ast::Condition::Message {
-                            ref topic,
-                            ref src_role,
-                            acting_role: _,
-                        } = c_ast {
-                    m_exc
-                        .msg_filters
+                if let &ast::Condition::Message { ref topic, ref src_role, acting_role: _ } =
+                    c_ast {
+                    m_exc.msg_filters
                         .insert(MessageFilter {
-                                    topic: topic.to_string(),
-                                    src_role: src_role.clone(),
-                                });
+                            topic: topic.to_string(),
+                            src_role: src_role.clone(),
+                        });
                 }
                 Condition::new(c_ast)
             })
             .collect();
-        m_exc.actions = m_ast
-            .actions
+        m_exc.actions = m_ast.actions
             .iter()
             .map(|a_ast| Action::new(a_ast))
             .collect();
@@ -70,15 +64,13 @@ impl Match {
     pub fn topics(&self) -> HashSet<String> {
         self.conditions
             .iter()
-            .filter_map(|c| if let &Condition::Message {
-                                        ref topic,
-                                        src_role: _,
-                                        acting_role: _,
-                                    } = c {
-                            Some(topic.to_string())
-                        } else {
-                            None
-                        })
+            .filter_map(|c| if let &Condition::Message { ref topic,
+                                                         src_role: _,
+                                                         acting_role: _ } = c {
+                Some(topic.to_string())
+            } else {
+                None
+            })
             .collect()
     }
 }
@@ -103,11 +95,7 @@ impl Condition {
             }
             &ast::Condition::IsSet(ref k) => Condition::IsSet(Identifier::from_ast(k)),
             &ast::Condition::IsUnset(ref k) => Condition::IsUnset(Identifier::from_ast(k)),
-            &ast::Condition::Message {
-                 ref topic,
-                 ref src_role,
-                 ref acting_role,
-             } => {
+            &ast::Condition::Message { ref topic, ref src_role, ref acting_role } => {
                 Condition::Message {
                     topic: topic.to_string(),
                     src_role: src_role.clone(),
@@ -149,7 +137,7 @@ impl CmpOpcode {
 
 #[derive(Clone, Debug)]
 pub enum Action {
-    SetVar(Identifier, String),
+    SetVar(Identifier, Value),
     UnsetVar(Identifier),
     Script(String),
     Match(Match),
@@ -167,7 +155,7 @@ impl Action {
     fn new(a_ast: &ast::Action) -> Action {
         match a_ast {
             &ast::Action::SetVar(ref k, ref v) => {
-                Action::SetVar(Identifier::from_ast(k), v.to_string())
+                Action::SetVar(Identifier::from_ast(k), Value::from_str(v))
             }
             &ast::Action::UnsetVar(ref k) => Action::UnsetVar(Identifier::from_ast(k)),
             &ast::Action::Script(ref contents) => Action::Script(contents.to_string()),

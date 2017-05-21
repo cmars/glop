@@ -176,6 +176,35 @@ impl Message {
         self.in_reply_to = in_reply_to.clone();
         self
     }
+
+    pub fn flat_map(&self) -> Vec<(String, String)> {
+        let mut result = Value::to_flat_map_prefix(&self.contents, "contents");
+        result.push(("id".to_string(), self.id.clone()));
+        result.push(("src_remote".to_string(),
+                     match self.src_remote {
+                         Some(ref src_remote) => src_remote.to_string(),
+                         None => "".to_string(),
+                     }));
+        result.push(("src_agent".to_string(), self.src_agent.clone()));
+        result.push(("src_role".to_string(),
+                     match self.src_role {
+                         Some(ref src_role) => src_role.to_string(),
+                         None => "".to_string(),
+                     }));
+        result.push(("dst_remote".to_string(),
+                     match self.dst_remote {
+                         Some(ref dst_remote) => dst_remote.to_string(),
+                         None => "".to_string(),
+                     }));
+        result.push(("dst_agent".to_string(), self.dst_agent.clone()));
+        result.push(("topic".to_string(), self.topic.to_string()));
+        result.push(("in_reply_to".to_string(),
+                     match self.in_reply_to {
+                         Some(ref in_reply_to) => in_reply_to.to_string(),
+                         None => "".to_string(),
+                     }));
+        result
+    }
 }
 
 /// FlatMap describes a structured object as flattened key-value pairs.
