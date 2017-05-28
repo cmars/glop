@@ -1,22 +1,21 @@
-// This agent will ping-pong back and forth internally with its variables.
-// Variables are manipulated by the 'set' action keyword.
-
-when (message init) {
-  var set ping true;
-}
-
-when (ping == true) {
-  script #!/bin/bash
-echo ping
+when (message intro from ponger as pinger) #!/bin/bash
+set -e
+glop msg reply intro ping
 !#
-  var set ping false;
-  var set pong true;
-}
 
-when (pong == true) {
-  script #!/bin/bash
-echo pong
+when (message intro from pinger as ponger) #!/bin/bash
+set -e
+glop msg reply intro pong
 !#
-  var set ping true;
-  var set pong false;
-}
+
+when (message ping from pinger as ponger) #!/bin/bash
+set -e
+echo "pong"
+glop msg reply pong ping
+!#
+
+when (message pong from ponger as pinger) #!/bin/bash
+set -e
+echo "pong"
+glop msg reply pong ping
+!#

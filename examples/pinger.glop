@@ -1,10 +1,70 @@
-when (message intro from ponger as pinger) #!/bin/bash
+roles:
+  pinger:
+    summary: A pinger reacts to pongs by replying with pings
+	reactions:
+      handle_intro:
+        events:
+		  - message:
+              topic: intro
+              from: ponger
+        script: |-
+#!/bin/bash
 set -e
-glop msg reply intro ping
-!#
 
-when (message pong from ponger as pinger) #!/bin/bash
+# Send a ping
+glop msg reply intro ping
+
+# Add the intro message to state with a prefix
+glop var set $(glop msg get intro | sed 's/^/ponger.intro./g' | xargs)
+
+	  handle_pong:
+        events:
+		  - message:
+              topic: pong
+              from: ponger
+        script: |-
+#!/bin/bash
+set -e
+echo "received pong"
+glop msg reply pong ping
+glop var set alive=true
+
+      handle_timeout:
+        events:
+		  - message:
+              topic: timeout
+              from: keepalive
+        script: |-
+#!/bin/bash
+set -e
+STATE=$(glop var get)
+echo ${STATE} | awk '/ponger.intro.src_agent/ || exit 0
+glop msg send -r $(echo ${STATE} | awk -F= '/ponger.intro.src_remote/ {print $2}') \
+	$(echo ${STATE} | awk -F= '/ponger.intro.src_agent/ {print $2}') \
+	ping
+
+  keepalive:
+    summary: Send the pinger a timeout message if it doesn't seem to be active
+    reactions:
+      handle_timeout:
+        events:
+          - elapsed: 5s
+        script: |-
+#!/bin/bash
+set -e
+(glop var get | awk '/^pinger.active=/') && glop var unset pinger.active || glop send self timeout
+
+  ponger:
+    summary: A ponger reacts to pings by replying with pongs
+	reactions:
+	  handle_ping:
+        events:
+		  - message:
+              topic: ping
+              from_role: pinger
+        script: |-
+#!/bin/bash
 set -e
 echo "pong"
-glop msg reply pong ping
-!#
+glop msg reply ping pong
+

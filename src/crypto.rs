@@ -27,7 +27,8 @@ impl<T: Decoder + Encoder> SecretBoxCodec<T>
 }
 
 impl<T: Decoder> Decoder for SecretBoxCodec<T>
-    where T: Encoder, T: Decoder<Error = std::io::Error>
+    where T: Encoder,
+          T: Decoder<Error = std::io::Error>
 {
     type Item = <T as Decoder>::Item;
     type Error = std::io::Error;
@@ -59,7 +60,8 @@ impl<T: Decoder> Decoder for SecretBoxCodec<T>
 }
 
 impl<T: Encoder> Encoder for SecretBoxCodec<T>
-    where T: Decoder, T: Encoder<Error = std::io::Error>
+    where T: Decoder,
+          T: Encoder<Error = std::io::Error>
 {
     type Item = <T as Encoder>::Item;
     type Error = std::io::Error;

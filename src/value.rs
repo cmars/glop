@@ -2,8 +2,6 @@ extern crate textnonce;
 
 use std::collections::HashMap;
 
-use super::ast;
-
 #[derive(Serialize, Deserialize)]
 #[derive(Clone, Debug)]
 pub enum Value {
@@ -215,10 +213,6 @@ pub type FlatMap = HashMap<String, String>;
 pub struct Identifier(Vec<String>);
 
 impl Identifier {
-    pub fn from_ast(i_ast: &ast::Identifier) -> Identifier {
-        Identifier(i_ast.clone())
-    }
-
     pub fn from_str(s: &str) -> Identifier {
         let v: Vec<String> = s.split(".").map(|x| x.to_string()).collect();
         Identifier(v)

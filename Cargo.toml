@@ -5,10 +5,6 @@ description = "Glue Language for OPerations"
 license = "Apache-2.0"
 authors = ["Casey Marshall <glop@cmars.tech>"]
 repository = "https://github.com/glop-rs/glop"
-build = "build.rs"
-
-[build-dependencies]
-peg = { version = "0.4" }
 
 [dependencies]
 base64 = "0.4"
@@ -20,9 +16,10 @@ futures = "0.1"
 futures-cpupool = "0.1"
 itertools = "0.5"
 log = "0.3"
-serde = "0.9"
-serde_derive = "0.9"
-serde_json = "0.9"
+serde = "1.0"
+serde_derive = "1.0"
+serde_json = "1.0"
+serde_yaml = "0.7"
 sodiumoxide = "0.0.14"
 spoolq = "0.2"
 textnonce = "0.4"

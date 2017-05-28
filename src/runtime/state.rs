@@ -100,13 +100,11 @@ impl<S: Storage> State<S> {
                 &Action::UnsetVar(ref k) => {
                     k.unset(&mut vars);
                 }
-                &Action::SendMsg {
-                     ref dst_remote,
-                     ref dst_agent,
-                     ref topic,
-                     ref in_reply_to,
-                     ref contents,
-                 } => {
+                &Action::SendMsg { ref dst_remote,
+                                   ref dst_agent,
+                                   ref topic,
+                                   ref in_reply_to,
+                                   ref contents } => {
                     let msg = Message::new(topic, contents.clone())
                         .src_agent(&self.name)
                         .src_role(txn.m.acting_role.clone())
@@ -263,8 +261,7 @@ impl DurableStorage {
             .to_str()
             .unwrap()
             .to_string();
-        std::fs::DirBuilder::new()
-            .recursive(true)
+        std::fs::DirBuilder::new().recursive(true)
             .mode(0o700)
             .create(&topics_path)
             .map_err(error::Error::IO)?;
@@ -273,22 +270,21 @@ impl DurableStorage {
             .to_str()
             .unwrap()
             .to_string();
-        std::fs::DirBuilder::new()
-            .recursive(true)
+        std::fs::DirBuilder::new().recursive(true)
             .mode(0o700)
             .create(&workspace)
             .map_err(error::Error::IO)?;
         DurableStorage::recover_all(&topics_path)?;
         Ok(DurableStorage {
-               checkpoint: DurableCheckpoint {
-                   seq: 0,
-                   vars: HashMap::new(),
-               },
-               checkpoint_path: checkpoint_path,
-               topics: HashMap::new(),
-               topics_path: topics_path,
-               workspace: workspace,
-           })
+            checkpoint: DurableCheckpoint {
+                seq: 0,
+                vars: HashMap::new(),
+            },
+            checkpoint_path: checkpoint_path,
+            topics: HashMap::new(),
+            topics_path: topics_path,
+            workspace: workspace,
+        })
     }
 
     fn recover_all(path: &str) -> Result<()> {
@@ -343,11 +339,9 @@ impl Storage for DurableStorage {
             return Ok((self.checkpoint.seq, self.checkpoint.vars.clone()));
         }
         {
-            let chk_file = std::fs::OpenOptions::new()
-                .read(true)
+            let chk_file = std::fs::OpenOptions::new().read(true)
                 .open(&self.checkpoint_path)?;
-            self.checkpoint = serde_json::from_reader(chk_file)
-                .map_err(to_ioerror)
+            self.checkpoint = serde_json::from_reader(chk_file).map_err(to_ioerror)
                 .map_err(error::Error::IO)?;
             debug!("DurableStorage.load: loaded checkpoint: {:?}",
                    &self.checkpoint);
@@ -367,14 +361,12 @@ impl Storage for DurableStorage {
             seq: seq + 1,
         };
         {
-            let mut chk_file = std::fs::OpenOptions::new()
-                .write(true)
+            let mut chk_file = std::fs::OpenOptions::new().write(true)
                 .mode(0o600)
                 .create(true)
                 .truncate(true)
                 .open(&self.checkpoint_path)?;
-            serde_json::to_writer(&mut chk_file, &chk)
-                .map_err(to_ioerror)
+            serde_json::to_writer(&mut chk_file, &chk).map_err(to_ioerror)
                 .map_err(error::Error::IO)?;
         }
         if !std::path::Path::new(&self.checkpoint_path).exists() {

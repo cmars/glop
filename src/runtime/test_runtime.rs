@@ -117,9 +117,9 @@ fn matched_init_message<T: Storage>(f: StateFactory<T>) {
         Some(mut txn) => {
             assert_eq!(txn.seq, 0);
             txn.with_context(|ctx| {
-                                 assert!(ctx.msgs.contains_key("init"));
-                                 assert_eq!(ctx.msgs.len(), 1);
-                             });
+                assert!(ctx.msgs.contains_key("init"));
+                assert_eq!(ctx.msgs.len(), 1);
+            });
             txn
         }
         None => panic!("expected match"),
@@ -155,9 +155,9 @@ fn rollback_msg<T: Storage>(f: StateFactory<T>) {
         Some(mut txn) => {
             assert_eq!(txn.seq, 0);
             txn.with_context(|ctx| {
-                                 assert!(ctx.msgs.contains_key("init"));
-                                 assert_eq!(ctx.msgs.len(), 1);
-                             });
+                assert!(ctx.msgs.contains_key("init"));
+                assert_eq!(ctx.msgs.len(), 1);
+            });
             txn
         }
         None => panic!("expected match"),
@@ -169,9 +169,9 @@ fn rollback_msg<T: Storage>(f: StateFactory<T>) {
         Some(mut txn) => {
             assert_eq!(txn.seq, 0);
             txn.with_context(|ctx| {
-                                 assert!(ctx.msgs.contains_key("init"));
-                                 assert_eq!(ctx.msgs.len(), 1);
-                             });
+                assert!(ctx.msgs.contains_key("init"));
+                assert_eq!(ctx.msgs.len(), 1);
+            });
             txn
         }
         None => panic!("expected match"),
@@ -215,9 +215,9 @@ fn matched_only_init_message<T: Storage>(f: StateFactory<T>) {
         Some(mut txn) => {
             assert_eq!(txn.seq, 0);
             txn.with_context(|ref mut ctx| {
-                                 assert!(ctx.msgs.contains_key("init"));
-                                 assert_eq!(ctx.msgs.len(), 1);
-                             });
+                assert!(ctx.msgs.contains_key("init"));
+                assert_eq!(ctx.msgs.len(), 1);
+            });
             txn
         }
         None => panic!("expected match"),
@@ -264,10 +264,10 @@ fn matched_two_messages<T: Storage>(f: StateFactory<T>) {
             Some(mut txn) => {
                 assert_eq!(txn.seq, i);
                 txn.with_context(|ref mut ctx| {
-                                     assert!(ctx.msgs.contains_key("foo"));
-                                     assert!(ctx.msgs.contains_key("bar"));
-                                     assert_eq!(ctx.msgs.len(), 2);
-                                 });
+                    assert!(ctx.msgs.contains_key("foo"));
+                    assert!(ctx.msgs.contains_key("bar"));
+                    assert_eq!(ctx.msgs.len(), 2);
+                });
                 txn
             }
             None => panic!("expected match"),
@@ -715,9 +715,9 @@ fn nested_two_msgs<T: Storage>(f: StateFactory<T>) {
                              topic: "foo".to_string(),
                              src_role: None,
                          }]
-                                .iter()
-                                .cloned()
-                                .collect())
+            .iter()
+            .cloned()
+            .collect())
         .unwrap();
     assert!(msgs.contains_key("bar"));
     assert!(!msgs.contains_key("foo"));
