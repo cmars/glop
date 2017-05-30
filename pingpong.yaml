@@ -1,149 +1,152 @@
+---
 # An example ping/pong glop agent.
 #
-# An agent is defined as a state machine, which can be nested into sub-state
-# machines. Upon entering a super-state (a state containing sub-states),
-# the agent moves to the 'start' state.
-#
-# All super-states must declare a start state.
-#
-start:
-  do:
-    # A split creates a concurrent substates within this state.
-    # Here we concurrently enter the 'pinger' and 'ponger' substates at the start.
-    - split:
-        - enter: pinger
-        - enter: ponger
-    # 'await' blocks until an event is received.
-    # With no events defined, this just blocks forever.
-    - await:
-
-  # If either substate terminates on an unhandled fault, the fault propagates
-  # up the stack to its superstate. Upon such a fault, we leave the 'start'
-  # state, which also terminates all concurrent substates contained therein.
-  #
-  # So, if the 'pinger' substate faults up to here, we leave 'start' on fault,
-  # also terminating 'ponger'.
-  #
-  # An unhandled fault at the agent's top-level superstate terminates the agent.
-  fault:
-
-    # Just restart this superstate on any fault. More nuanced ways to deal with
-    # faults could be:
-    # - Retrying up to a limit with a backoff delay.
-    # - Signaling for operator intervention after some number of attempts.
-    - restart:
-
-# The 'pinger' superstate peers with a remote 'pingable' once introduced, sends
-# pings to it, and expects pongs in return.
-pinger:
-
+# An agent is defined as a nested state machine, where its states may be These
+# sub-states may in turn be singular states, or super-states composed of
+# further sub-states. Each composite super-state delcares a starting sub-state,
+# 'start', which is always entered first.
+states:
   start:
-
     # Upon entering a state, the 'do' section is executed sequentially.
     do:
-      # 'await' blocks until the event handler is triggered. This does not time out.
-      - await:
-          # In this case, wait for a message from an agent that offers to
-          # act in the "pingable" role.
-          message:
-            topic: peer_request
-            role: pingable
-
-      # Split off a send_ping substate to ping this pingable we've just been
-      # introduced to.
+      # A split creates concurrent substates within the current super-state.
+      # Here we concurrently enter the 'pinger' and 'ponger' substates at the start.
       - split:
-          - enter: send_ping
-            set:
-              peer: message.topic.intro
-
-  send_ping:
-    do:
-      # Send a ping to the pingable peer
-      - send:
-          dst: peer.src
-          topic: "ping"
-          contents: "ping"
-      # Wait for a pong from the pingable, or until a timeout elapses.
-      - await_any:
-          - message:
-              topic: pong
-              role: pingable
-          - elapsed: 15s
-      # Assert that we've received a pong message. If we haven't, we've timed
-      # out, in which case, a fault is raised, and we'd jump down to the fault
-      # section below.
-      - assert:
-          condition: message.topic.pong
-          # Named assertions can be used to discern the cause of the fault if
-          # we care. ping_timeout.failed will be true if the assertion fails.
-          name: ping_timeout
-      # With no further actions, the pinger state terminates without fault.
-
-    # faults handle assertion failures as well as other error conditions, such
-    # as non-zero exit codes from scripts and messaging communication failure.
-    fault:
-      - when:
-          # After 10 failed ping attempts with backoff delay, give up on that
-          # peer. Go back to the need_peer state so we can get introduced to a
-          # peer that works.
-          condition: ping_attempts > 10
-          do:
-            - log: "max attempts exceeded, giving up on peer"
-            # With no further actions, the pinger state terminates without fault.
-      - otherwise:
-          # Increment attempts count, keep trying to ping.
-          do:
-            - set:
-                ping_attempts: ping_attempts++
-            # Keep pinging.
-            - goto: send_ping
-
-# The ponger replies to introductions by advertising itself as pingable, and to
-# pings with pongs.
-ponger:
-
-  start:
-    do:
-      - split:
-          - enter: handle_intro
-          - enter: handle_ping
-
-  handle_intro:
-    do:
+          - enter: pinger
+          - enter: ponger
+      # 'await' blocks until an event is received.
       - await:
-          message:
-            # The 'intro' topic is received by both agents when introduced,
-            # with paired src and dst, as if the messages originated from the
-            # other.
-            topic: intro
-      - send:
-          # In this case, the ponger agent replies with 'peer_request' and a
-          # role 'pingable', which satisfies the pinger's peer requirements.
-          dst: message.topic.intro.src
-          role: pingable
-          topic: peer_request
+          # 'join' events are raised when a concurrent substate terminates.
+          - join: {}
+      # pinger and ponger substates should not terminate, so assert that
+      # execution doesn't get here.
+      - assert: "false"
+    # An unhandled fault at the agent's top-level superstate otherwise
+    # terminates the agent. Instead, let's just perform a hard restart of the
+    # entire agent.
     fault:
-      - log: "failed to reply with peer_request"
-      - goto: handle_intro
+      # Just restart the entire agent on any fault. More nuanced ways to deal with
+      # faults could be:
+      # - Retrying up to a limit with a backoff delay.
+      # - Signaling for operator intervention after some number of attempts.
+      - restart: {}
 
-  handle_ping:
-    do:
-      - await:
-          topic: "ping"
-      - send:
-          dst: message.topic.ping.src
-          topic: "pong"
-          contents: "pong"
-    fault:
-      - log: "failed to reply with pong"
-      - goto: handle_ping
+  # The 'pinger' state peers with a remote 'pingable' once introduced, sends
+  # pings to it, and expects pongs in return.
+  pinger:
+    # pinger is a super-state, so instead of a do: block, it declares substates
+    # in a states: block.
+    states:
+
+      # As above, so below. Upon entering the pinger state, begin in the start state.
+      start:
+        do:
+          # 'await' blocks until the event handler is triggered. This does not time out.
+          - await:
+              # In this case, wait for a message from an agent that offers to
+              # act in the "pingable" role.
+              - message:
+                  topic: peer_request
+                  role: pingable
+
+          # Split off a send_ping substate to ping this pingable we've just been
+          # introduced to.
+          - split:
+              - enter: send_ping
+                set:
+                  peer: message.topic.intro
+
+          # Keep handling peer requests.
+          - goto: start
+
+      send_ping:
+        do:
+          # Send a ping to the pingable peer
+          - send:
+              dst: peer.src
+              topic: "ping"
+              contents: "ping"
+          # Wait for a pong from the pingable, or until a timeout elapses.
+          - await:
+              - message:
+                  topic: pong
+                  role: pingable
+              - elapsed: 15s
+          # Assert that we've received a pong message. If we haven't, we've timed
+          # out, in which case, a fault is raised, and we'd jump down to the fault
+          # section below.
+          - assert: message.topic.pong
+          # With no further actions, the pinger state terminates without fault.
+
+        # faults handle assertion failures as well as other error conditions, such
+        # as non-zero exit codes from scripts and messaging communication failure.
+        fault:
+          - when:
+              - condition: ping_attempts > 10
+                do:
+                  - log: "max attempts exceeded, giving up on peer"
+                # With no further actions, the pinger state terminates without fault.
+              - otherwise:
+                  - when:
+                      - condition: undefined(ping_attempts)
+                        do:
+                          - set:
+                              ping_attempts: 1
+                      - otherwise:
+                        # After 10 failed ping attempts with backoff delay, give up on that
+                        # peer.
+                          - set:
+                            ping_attempts: ping_attempts+1
+                  # Keep pinging.
+                  - goto: send_ping
+
+    # The ponger replies to introductions by advertising itself as pingable, and to
+    # pings with pongs.
+    ponger:
+      states:
+        start:
+          do:
+            - split:
+                - enter: handle_intro
+                - enter: handle_ping
+            - await:
+                - join: {}
+            - goto: start
+
+        handle_intro:
+          do:
+            - await:
+                - message:
+                    # The 'intro' topic is received by both agents when introduced,
+                    # with paired src and dst, as if the messages originated from the
+                    # other.
+                    topic: intro
+            - send:
+                # In this case, the ponger agent replies with 'peer_request' and a
+                # role 'pingable', which satisfies the pinger's peer requirements.
+                dst: message.topic.intro.src
+                role: pingable
+                topic: peer_request
+          fault:
+            - log: "failed to reply with peer_request"
+            - goto: handle_intro
+
+        handle_ping:
+          do:
+            - await:
+                topic: "ping"
+            - send:
+                dst: message.topic.ping.src
+                topic: "pong"
+                contents: "pong"
+          fault:
+            - log: "failed to reply with pong"
+            - goto: handle_ping
 
 # Further notes:
 #
-# Unhandled faults terminate the agent.
 # Log messages could be templates with access to context variables.
 #
-# Nested states may be expressed with an 'enter:' action, which takes
-# a state machine as an argument. The difference between enter: and call is
-#
+# A shortcut for the split - await/join - assert:false idiom could be a top-level split:
+# alternative to "do:" and "states:"
 #
