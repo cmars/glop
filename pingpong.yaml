@@ -1,10 +1,10 @@
 ---
 # An example ping/pong glop agent.
 #
-# An agent is defined as a nested state machine, where its states may be These
-# sub-states may in turn be singular states, or super-states composed of
-# further sub-states. Each composite super-state delcares a starting sub-state,
-# 'start', which is always entered first.
+# An agent is defined as a nested state machine. These sub-states may in turn
+# be singular states, or super-states composed of further sub-states. Each
+# composite super-state delcares a starting sub-state, 'start', which is always
+# entered first.
 states:
   start:
     # Upon entering a state, the 'do' section is executed sequentially.
@@ -38,7 +38,7 @@ states:
     # in a states: block.
     states:
 
-      # As above, so below. Upon entering the pinger state, begin in the start state.
+      # As above, so below. Upon entering the pinger state, enter its start state.
       start:
         do:
           # 'await' blocks until the event handler is triggered. This does not time out.

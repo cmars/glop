@@ -11,7 +11,7 @@ import (
 type State interface {
 	Fault() []Action
 	Name() string
-	Parent() State
+	Parent() *CompositeState
 }
 
 type Action interface {
@@ -29,7 +29,7 @@ func (s *SingularState) Fault() []Action { return s.fault }
 
 func (s *SingularState) Name() string { return s.name }
 
-func (s *SingularState) Parent() State { return s.parent }
+func (s *SingularState) Parent() *CompositeState { return s.parent }
 
 type CompositeState struct {
 	name   string
@@ -38,29 +38,36 @@ type CompositeState struct {
 	fault  []Action
 }
 
-func (s *CompositeState) AddSingular(name string, do []Action, fault []Action) {
-	s.states[name] = &SingularState{
+func (s *CompositeState) AddSingular(name string, do []Action, fault []Action) *SingularState {
+	st := &SingularState{
 		name:   name,
 		parent: s,
 		do:     do,
 		fault:  fault,
 	}
+	s.states[name] = st
+	return st
 }
 
-func (s *CompositeState) AddComposite(name string, states map[string]State, fault []Action) {
-	s.states[name] = &CompositeState{
+func (s *CompositeState) AddComposite(name string, states map[string]State, fault []Action) *CompositeState {
+	if states == nil {
+		states = map[string]State{}
+	}
+	st := &CompositeState{
 		name:   name,
 		parent: s,
 		states: states,
 		fault:  fault,
 	}
+	s.states[name] = st
+	return st
 }
 
 func (s *CompositeState) Fault() []Action { return s.fault }
 
 func (s *CompositeState) Name() string { return s.name }
 
-func (s *CompositeState) Parent() State { return s.parent }
+func (s *CompositeState) Parent() *CompositeState { return s.parent }
 
 func (s *CompositeState) Start() State {
 	st, ok := s.states["start"]
@@ -97,13 +104,13 @@ func (c *Context) State(name string) State {
 	if c.state.Name() == name {
 		return c.state
 	}
-	cs := c.state.Parent().(*CompositeState)
+	cs := c.state.Parent()
 	for cs != nil {
 		st, ok := cs.states[name]
 		if ok {
 			return st
 		}
-		cs = c.state.Parent().(*CompositeState)
+		cs = c.state.Parent()
 	}
 	return nil
 }
@@ -137,8 +144,14 @@ func (c *Context) Fault(err error) bool {
 	st := c.state
 	for st != nil {
 		fault := st.Fault()
-		if len(fault) == 0 {
-			st = st.Parent()
+		if len(fault) == 0 || c.fault != nil {
+			c.fault = nil
+			if parent := st.Parent(); parent != nil {
+				st = parent
+			} else {
+				// Set the interface value to nil -- not its target.
+				st = nil
+			}
 			c.locals = map[string]interface{}{}
 			continue
 		}
@@ -148,6 +161,7 @@ func (c *Context) Fault(err error) bool {
 		c.index = -1
 		return true
 	}
+	c.fault = err
 	return false
 }
 
@@ -184,10 +198,24 @@ func (a Assert) Do(c *Context) {
 		c.Fault(errors.WithMessage(err, "assert: cannot evaluate"))
 		return
 	}
-	if b, ok := result.(bool); b && ok {
+	if isTrue(result) {
 		return
 	}
 	c.Fault(errors.New("assertion failed"))
+}
+
+func isTrue(v interface{}) bool {
+	switch val := v.(type) {
+	case bool:
+		return val
+	case float64:
+		return val == 0.0
+	case string:
+		return val != ""
+	case []interface{}:
+		return len(val) > 0
+	}
+	return false
 }
 
 type SetLocal map[string]string
@@ -212,4 +240,36 @@ type Log string
 
 func (a Log) Do(c *Context) {
 	log.Println(a)
+}
+
+type When struct {
+	Conditions []Condition
+	Otherwise  []Action
+}
+
+type Condition struct {
+	Expression string
+	Do         []Action
+}
+
+func (a *When) Do(c *Context) {
+	for _, cond := range a.Conditions {
+		expr, err := govaluate.NewEvaluableExpression(cond.Expression)
+		if err != nil {
+			c.Fault(errors.Wrap(err, "when: invalid expression"))
+			return
+		}
+		result, err := expr.Evaluate(c.Parameters())
+		if err != nil {
+			c.Fault(errors.WithMessage(err, "when: cannot evaluate condition"))
+			return
+		}
+		if isTrue(result) {
+			c.actions = append(append(c.actions[:c.index], cond.Do...), c.actions[c.index:]...)
+			return
+		}
+	}
+	if len(a.Otherwise) > 0 {
+		c.actions = append(append(c.actions[:c.index], a.Otherwise...), c.actions[c.index:]...)
+	}
 }
