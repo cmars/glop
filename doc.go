@@ -2,7 +2,6 @@ package glop
 
 import (
 	"encoding/json"
-	"log"
 	"strings"
 	"time"
 
@@ -19,7 +18,6 @@ func Visit(doc Element, f func(e Element) error) error {
 	elements := []Element{doc}
 	for len(elements) > 0 {
 		e := elements[0]
-		log.Printf("%+T %+v", e, e)
 		elements = elements[1:]
 		if err := f(e); err != nil {
 			return err

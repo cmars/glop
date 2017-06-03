@@ -3,9 +3,13 @@ package glop
 import (
 	"fmt"
 	"log"
+	"reflect"
+	"sync"
+	"time"
 
 	"github.com/Knetic/govaluate"
 	"github.com/pkg/errors"
+	"gopkg.in/tomb.v2"
 )
 
 type State interface {
@@ -84,20 +88,30 @@ type Context struct {
 	fault   error
 	locals  map[string]interface{}
 	globals map[string]interface{}
+	splits  *tomb.Tomb
+	bus     *MessageBus
 }
 
 func NewContext(state State) *Context {
-	c := &Context{globals: map[string]interface{}{}}
-	c.Enter(state)
+	c := &Context{globals: map[string]interface{}{}, splits: &tomb.Tomb{}, bus: NewMessageBus()}
+	c.Enter(state, nil)
 	return c
 }
 
+func (c *Context) Spawn() {
+	c.splits.Go(func() error {
+		for c.Next() {
+			a := c.Action()
+			a.Do(c)
+		}
+		return c.fault
+	})
+}
+
 func (c *Context) Run() error {
-	for c.Next() {
-		a := c.Action()
-		a.Do(c)
-	}
-	return c.fault
+	defer c.bus.Close()
+	c.Spawn()
+	return c.splits.Wait()
 }
 
 func (c *Context) State(name string) State {
@@ -110,7 +124,7 @@ func (c *Context) State(name string) State {
 		if ok {
 			return st
 		}
-		cs = c.state.Parent()
+		cs = cs.Parent()
 	}
 	return nil
 }
@@ -126,15 +140,18 @@ func (c *Context) Parameters() map[string]interface{} {
 	return result
 }
 
-func (c *Context) Enter(state State) {
+func (c *Context) Enter(state State, locals map[string]interface{}) {
+	if locals == nil {
+		locals = map[string]interface{}{}
+	}
 	switch st := state.(type) {
 	case *SingularState:
 		c.state = st
 		c.actions = st.do
 		c.index = -1
-		c.locals = map[string]interface{}{}
+		c.locals = locals
 	case *CompositeState:
-		c.Enter(st.Start())
+		c.Enter(st.Start(), locals)
 	default:
 		panic(fmt.Sprintf("invalid state type: %+T", state))
 	}
@@ -152,6 +169,7 @@ func (c *Context) Fault(err error) bool {
 				// Set the interface value to nil -- not its target.
 				st = nil
 			}
+			c.splits.Kill(nil)
 			c.locals = map[string]interface{}{}
 			continue
 		}
@@ -163,6 +181,22 @@ func (c *Context) Fault(err error) bool {
 	}
 	c.fault = err
 	return false
+}
+
+func (c *Context) Split(st State, locals map[string]interface{}) *Context {
+	// Give the child context its own copy of the global variables.
+	// Like a fork(2).
+	globals := map[string]interface{}{}
+	for k := range c.globals {
+		globals[k] = c.globals[k]
+	}
+	childC := &Context{
+		globals: globals,
+		splits:  c.splits,
+		bus:     c.bus,
+	}
+	childC.Enter(st, locals)
+	return childC
 }
 
 func (c *Context) Next() bool {
@@ -181,7 +215,7 @@ func (a Goto) Do(c *Context) {
 	if st == nil {
 		c.Fault(errors.Errorf("state not found: %q", a))
 	} else {
-		c.Enter(st)
+		c.Enter(st, nil)
 	}
 }
 
@@ -209,7 +243,7 @@ func isTrue(v interface{}) bool {
 	case bool:
 		return val
 	case float64:
-		return val == 0.0
+		return val != 0.0
 	case string:
 		return val != ""
 	case []interface{}:
@@ -272,4 +306,238 @@ func (a *When) Do(c *Context) {
 	if len(a.Otherwise) > 0 {
 		c.actions = append(append(c.actions[:c.index], a.Otherwise...), c.actions[c.index:]...)
 	}
+}
+
+type Exit struct{}
+
+func (a *Exit) Do(c *Context) {
+	c.splits.Kill(nil)
+}
+
+type Split []SplitEntry
+
+type SplitEntry struct {
+	State  string
+	Locals map[string]string
+}
+
+func (a Split) Do(c *Context) {
+	var err error
+	var contexts []*Context
+CONTEXTS:
+	for _, e := range a {
+		st := c.State(e.State)
+		if st == nil {
+			err = errors.Errorf("state not found: %q", a)
+			break
+		}
+		locals := map[string]interface{}{}
+		params := c.Parameters()
+		for k, v := range e.Locals {
+			var expr *govaluate.EvaluableExpression
+			var result interface{}
+			expr, err = govaluate.NewEvaluableExpression(v)
+			if err != nil {
+				break CONTEXTS
+			}
+			result, err = expr.Evaluate(params)
+			if err != nil {
+				break CONTEXTS
+			}
+			locals[k] = result
+		}
+		contexts = append(contexts, c.Split(st, locals))
+	}
+	if err != nil {
+		c.Fault(err)
+		return
+	}
+	for _, child := range contexts {
+		child.Spawn()
+	}
+}
+
+type Await []EventHandler
+
+type EventHandler interface {
+	Do() []Action
+	SelectCase(c *Context) reflect.SelectCase
+}
+
+type ElapsedEvent struct {
+	Duration time.Duration
+	Actions  []Action
+}
+
+func (ev *ElapsedEvent) SelectCase(_ *Context) reflect.SelectCase {
+	return reflect.SelectCase{
+		Dir:  reflect.SelectRecv,
+		Chan: reflect.ValueOf(time.NewTimer(ev.Duration).C),
+	}
+}
+
+func (ev *ElapsedEvent) Do() []Action { return ev.Actions }
+
+type JoinEvent struct {
+	Actions []Action
+}
+
+func (ev *JoinEvent) SelectCase(c *Context) reflect.SelectCase {
+	return reflect.SelectCase{
+		Dir:  reflect.SelectRecv,
+		Chan: reflect.ValueOf(c.splits.Dying()),
+	}
+}
+
+func (ev *JoinEvent) Do() []Action { return ev.Actions }
+
+type MessageEvent struct {
+	Topic   string
+	Actions []Action
+}
+
+func (ev *MessageEvent) SelectCase(c *Context) reflect.SelectCase {
+	return reflect.SelectCase{
+		Dir:  reflect.SelectRecv,
+		Chan: reflect.ValueOf(c.bus.SubscribeTopic(ev.Topic)),
+	}
+}
+
+func (ev *MessageEvent) Do() []Action { return ev.Actions }
+
+func (a Await) Do(c *Context) {
+	var cases []reflect.SelectCase
+	for _, ev := range a {
+		cases = append(cases, ev.SelectCase(c))
+	}
+	i, _, _ := reflect.Select(cases)
+	c.actions = append(append(c.actions[:c.index], a[i].Do()...), c.actions[c.index:]...)
+}
+
+type MessageBus struct {
+	t tomb.Tomb
+
+	mu        sync.RWMutex
+	topicsIn  map[string]chan *Message
+	topicsOut map[string]chan *Message
+}
+
+type Message struct {
+	Topic    string
+	Contents map[string]interface{}
+}
+
+func NewMessageBus() *MessageBus {
+	return &MessageBus{
+		topicsIn:  map[string]chan *Message{},
+		topicsOut: map[string]chan *Message{},
+	}
+}
+
+func (mb *MessageBus) Publish(m *Message) {
+	mb.publishTopic(m)
+	// TODO: publishRole
+}
+
+func (mb *MessageBus) publishTopic(m *Message) {
+	mb.mu.Lock()
+	defer mb.mu.Unlock()
+
+	chOut, ok := mb.topicsOut[m.Topic]
+	if !ok {
+		chOut = make(chan *Message)
+		mb.topicsOut[m.Topic] = chOut
+	}
+
+	chIn, ok := mb.topicsIn[m.Topic]
+	if !ok {
+		chIn = make(chan *Message)
+		mb.topicsIn[m.Topic] = chIn
+		mb.t.Go(mb.relay(chIn, chOut))
+	}
+	select {
+	case chIn <- m:
+	case <-mb.t.Dying():
+	}
+}
+
+func (mb *MessageBus) relay(chIn <-chan *Message, chOut chan<- *Message) func() error {
+	return func() error {
+		var q []*Message
+		for {
+			if len(q) > 0 {
+				select {
+				case chOut <- q[0]:
+					q = q[1:]
+				case m := <-chIn:
+					q = append(q, m)
+				case <-mb.t.Dying():
+					return nil
+				}
+			} else {
+				select {
+				case m := <-chIn:
+					q = append(q, m)
+				case <-mb.t.Dying():
+					return nil
+				}
+			}
+		}
+	}
+}
+
+func (mb *MessageBus) SubscribeTopic(topic string) <-chan *Message {
+	mb.mu.RLock()
+	defer mb.mu.RUnlock()
+
+	ch, ok := mb.topicsOut[topic]
+	if !ok {
+		ch = make(chan *Message)
+		mb.topicsOut[topic] = ch
+	}
+	return ch
+}
+
+func (mb *MessageBus) Close() error {
+	// Issue kill in a goroutine in case we've never spawned one. Otherwise the
+	// tomb won't enter a dying state even if killed.
+	mb.t.Go(func() error {
+		mb.t.Kill(nil)
+		return nil
+	})
+	return mb.t.Wait()
+}
+
+type Send struct {
+	Topic    string
+	Contents map[string]string
+}
+
+func (a *Send) Do(c *Context) {
+	contents, err := a.eval(c)
+	if err != nil {
+		c.Fault(err)
+		return
+	}
+	c.bus.Publish(&Message{Topic: a.Topic, Contents: contents})
+}
+
+func (a *Send) eval(c *Context) (map[string]interface{}, error) {
+	contents := map[string]interface{}{}
+	if a.Contents == nil {
+		return contents, nil
+	}
+	params := c.Parameters()
+	for k, v := range a.Contents {
+		expr, err := govaluate.NewEvaluableExpression(v)
+		if err != nil {
+			return nil, errors.Wrapf(err, "send: %q: invalid expression", k)
+		}
+		result, err := expr.Evaluate(params)
+		if err != nil {
+			return nil, errors.Wrapf(err, "send: %q: cannot evaluate", k)
+		}
+		contents[k] = result
+	}
+	return contents, nil
 }
