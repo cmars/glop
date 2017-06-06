@@ -292,12 +292,12 @@ func TestSplitAwaitJoin(t *testing.T) {
 			},
 			marker6,
 		}, nil)
-	st.AddSingular("m2", []Action{marker2, &Exit{}}, nil)
-	st.AddSingular("m3", []Action{marker3, &Exit{}}, nil)
+	st.AddSingular("m2", []Action{marker2, &Shutdown{}}, nil)
+	st.AddSingular("m3", []Action{marker3, &Shutdown{}}, nil)
 
 	c := NewContext(st)
 	err := c.Run()
-	assert.NoError(t, err)
+	assert.Equal(t, ErrShutdown, err)
 	assert.Equal(t, 1, marker1.hit)
 	assert.Equal(t, 1, marker2.hit)
 	assert.Equal(t, 1, marker3.hit)
@@ -332,14 +332,14 @@ func TestChooseElapsed(t *testing.T) {
 				&JoinEvent{Actions: []Action{marker5}},
 			},
 			marker6,
-			&Exit{},
+			&Shutdown{},
 		}, nil)
 	st.AddSingular("m2", []Action{marker2}, nil)
 	st.AddSingular("m3", []Action{marker3}, nil)
 
 	c := NewContext(st)
 	err := c.Run()
-	assert.NoError(t, err)
+	assert.Equal(t, ErrShutdown, err)
 	assert.Equal(t, 1, marker1.hit)
 	assert.Equal(t, 1, marker2.hit)
 	assert.Equal(t, 1, marker3.hit)
@@ -362,7 +362,6 @@ func TestSplitStateNotFound(t *testing.T) {
 			}, {
 				State: "m3",
 			}},
-			&Exit{},
 		}, nil)
 
 	c := NewContext(st)
@@ -387,7 +386,7 @@ func TestSendAwait(t *testing.T) {
 			&Await{
 				&MessageEvent{Topic: "foo", Actions: []Action{marker1}},
 			},
-			&Exit{},
+			&Shutdown{},
 		}, nil)
 	st.AddSingular("m2", []Action{&Send{
 		Topic: "foo",
@@ -395,7 +394,7 @@ func TestSendAwait(t *testing.T) {
 
 	c := NewContext(st)
 	err := c.Run()
-	assert.NoError(t, err)
+	assert.Equal(t, ErrShutdown, err)
 	assert.Equal(t, 1, marker1.hit)
 	assert.Equal(t, 1, marker2.hit)
 }
@@ -418,7 +417,7 @@ func TestSendAwaitTimeout(t *testing.T) {
 				&MessageEvent{Topic: "bar", Actions: []Action{marker1}},
 				&ElapsedEvent{Duration: time.Millisecond},
 			},
-			&Exit{},
+			&Shutdown{},
 		}, nil)
 	st.AddSingular("m2", []Action{&Send{
 		Topic: "foo",
@@ -426,7 +425,7 @@ func TestSendAwaitTimeout(t *testing.T) {
 
 	c := NewContext(st)
 	err := c.Run()
-	assert.NoError(t, err)
+	assert.Equal(t, ErrShutdown, err)
 	assert.Equal(t, 0, marker1.hit)
 	assert.Equal(t, 1, marker2.hit)
 }

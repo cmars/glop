@@ -2,6 +2,7 @@ package glop
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -77,6 +78,52 @@ type StateDoc struct {
 	Fault  []*ActionDoc         `json:"fault,omitempty"`
 }
 
+func (d *StateDoc) ToAST() (State, error) {
+	if err := d.Validate(); err != nil {
+		return nil, errors.WithStack(err)
+	}
+	if len(d.States) == 0 {
+		result := &SingularState{}
+		for _, actionDoc := range d.Do {
+			action, err := actionDoc.ToAST()
+			if err != nil {
+				return nil, errors.WithStack(err)
+			}
+			result.do = append(result.do, action)
+		}
+		for _, actionDoc := range d.Fault {
+			action, err := actionDoc.ToAST()
+			if err != nil {
+				return nil, errors.WithStack(err)
+			}
+			result.fault = append(result.fault, action)
+		}
+		return result, nil
+	}
+
+	result := &CompositeState{
+		states: map[string]State{},
+	}
+	for k, v := range d.States {
+		state, err := v.ToAST()
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+		switch st := state.(type) {
+		case *SingularState:
+			st.name = k
+			st.parent = result
+		case *CompositeState:
+			st.name = k
+			st.parent = result
+		default:
+			panic(fmt.Sprintf("unknown state type %+T", state))
+		}
+		result.states[k] = state
+	}
+	return result, nil
+}
+
 func (d *StateDoc) Validate() error {
 	if len(d.States) > 0 && len(d.Do) > 0 {
 		return errors.Wrap(NewNotValid("state"), "cannot declare both sub-states and actions")
@@ -112,14 +159,106 @@ func (d *StateDoc) Elements() []Element {
 }
 
 type ActionDoc struct {
-	Assert  *AssertDoc  `json:"assert,omitempty"`
-	Await   *AwaitDoc   `json:"await,omitempty"`
-	Goto    *GotoDoc    `json:"goto,omitempty"`
-	Log     *LogDoc     `json:"log,omitempty"`
-	Restart *RestartDoc `json:"restart,omitempty"`
-	Send    *SendDoc    `json:"send,omitempty"`
-	Split   *SplitDoc   `json:"split,omitempty"`
-	When    *WhenDoc    `json:"when,omitempty"`
+	Assert   *AssertDoc   `json:"assert,omitempty"`
+	Await    *AwaitDoc    `json:"await,omitempty"`
+	Goto     *GotoDoc     `json:"goto,omitempty"`
+	Log      *LogDoc      `json:"log,omitempty"`
+	Restart  *RestartDoc  `json:"restart,omitempty"`
+	Send     *SendDoc     `json:"send,omitempty"`
+	Split    *SplitDoc    `json:"split,omitempty"`
+	When     *WhenDoc     `json:"when,omitempty"`
+	Shutdown *ShutdownDoc `json:"shutdown,omitempty"`
+}
+
+func (d *ActionDoc) ToAST() (Action, error) {
+	if err := d.Validate(); err != nil {
+		return nil, errors.WithStack(err)
+	}
+	switch {
+	case d.Assert != nil:
+		return Assert(*d.Assert), errors.WithStack(d.Assert.Validate())
+	case d.Await != nil:
+		if err := d.Await.Validate(); err != nil {
+			return nil, errors.WithStack(err)
+		}
+		var result Await
+		for _, evDoc := range *d.Await {
+			ev, err := evDoc.ToAST()
+			if err != nil {
+				return nil, errors.WithStack(err)
+			}
+			result = append(result, ev)
+		}
+		return result, nil
+	case d.Goto != nil:
+		return Goto(*d.Goto), errors.WithStack(d.Goto.Validate())
+	case d.Log != nil:
+		return Log(*d.Log), errors.WithStack(d.Log.Validate())
+	case d.Restart != nil:
+		panic("not implemented yet")
+	case d.Send != nil:
+		contents := map[string]string{}
+		if d.Send.Contents != nil {
+			for k, v := range d.Send.Contents {
+				contents[k] = v
+			}
+		}
+		return &Send{
+			Topic:    d.Send.Topic,
+			Contents: contents,
+		}, errors.WithStack(d.Send.Validate())
+	case d.Split != nil:
+		if err := d.Split.Validate(); err != nil {
+			return nil, errors.WithStack(err)
+		}
+		var result Split
+		for _, epDoc := range *d.Split {
+			ep, err := epDoc.ToAST()
+			if err != nil {
+				return nil, errors.WithStack(err)
+			}
+			result = append(result, ep)
+		}
+		return result, nil
+	case d.When != nil:
+		if err := d.When.Validate(); err != nil {
+			return nil, errors.WithStack(err)
+		}
+		result := &When{}
+		for _, condDoc := range *d.When {
+			err := condDoc.Validate()
+			if err != nil {
+				return nil, errors.WithStack(err)
+			}
+			var actions []Action
+			var actionDocs []ActionDoc
+			if condDoc.Condition != "" {
+				actionDocs = condDoc.Do
+			} else {
+				actionDocs = condDoc.Otherwise
+			}
+			for _, actionDoc := range actionDocs {
+				action, err := actionDoc.ToAST()
+				if err != nil {
+					return nil, errors.WithStack(err)
+				}
+				actions = append(actions, action)
+			}
+			if condDoc.Condition != "" {
+				result.Conditions = append(result.Conditions, Condition{
+					Expression: condDoc.Condition,
+					Do:         actions,
+				})
+			} else {
+				result.Otherwise = actions
+			}
+		}
+		return result, nil
+	case d.Shutdown != nil:
+		return &Shutdown{}, nil
+	default:
+		panic("invalid action")
+	}
 }
 
 func (d *ActionDoc) Validate() error {
@@ -146,7 +285,10 @@ func (d *ActionDoc) Validate() error {
 		types = append(types, "split")
 	}
 	if d.When != nil {
-		types = append(types, "When")
+		types = append(types, "when")
+	}
+	if d.Shutdown != nil {
+		types = append(types, "shutdown")
 	}
 	if len(types) == 0 {
 		return errors.Wrap(NewNotValid("action"), "missing or unknown type")
@@ -182,6 +324,9 @@ func (d *ActionDoc) Elements() []Element {
 	if d.When != nil {
 		return []Element{d.When}
 	}
+	if d.Shutdown != nil {
+		return []Element{d.Shutdown}
+	}
 	panic("invalid action")
 }
 
@@ -199,11 +344,6 @@ func (d *AssertDoc) Elements() []Element { return nil }
 type AwaitDoc []*EventDoc
 
 func (d AwaitDoc) Validate() error {
-	for _, et := range d {
-		if err := et.Validate(); err != nil {
-			return errors.WithStack(err)
-		}
-	}
 	return nil
 }
 
@@ -219,6 +359,68 @@ type EventDoc struct {
 	Message *MessageEventDoc `json:"message,omitempty"`
 	Elapsed *ElapsedEventDoc `json:"elapsed,omitempty"`
 	Join    *JoinEventDoc    `json:"join,omitempty"`
+}
+
+func (d *EventDoc) ToAST() (EventHandler, error) {
+	err := d.Validate()
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	switch {
+	case d.Message != nil:
+		if err := d.Message.Validate(); err != nil {
+			return nil, errors.WithStack(err)
+		}
+		var actions []Action
+		for _, actionDoc := range d.Message.Do {
+			action, err := actionDoc.ToAST()
+			if err != nil {
+				return nil, errors.WithStack(err)
+			}
+			actions = append(actions, action)
+		}
+		return &MessageEvent{
+			Topic:   d.Message.Topic,
+			Actions: actions,
+		}, nil
+	case d.Elapsed != nil:
+		if err := d.Elapsed.Validate(); err != nil {
+			return nil, errors.WithStack(err)
+		}
+		duration, err := time.ParseDuration(d.Elapsed.Duration)
+		if err != nil {
+			panic(err)
+		}
+		var actions []Action
+		for _, actionDoc := range d.Elapsed.Do {
+			action, err := actionDoc.ToAST()
+			if err != nil {
+				return nil, errors.WithStack(err)
+			}
+			actions = append(actions, action)
+		}
+		return &ElapsedEvent{
+			Duration: duration,
+			Actions:  actions,
+		}, nil
+	case d.Join != nil:
+		if err := d.Join.Validate(); err != nil {
+			return nil, errors.WithStack(err)
+		}
+		var actions []Action
+		for _, actionDoc := range d.Join.Do {
+			action, err := actionDoc.ToAST()
+			if err != nil {
+				return nil, errors.WithStack(err)
+			}
+			actions = append(actions, action)
+		}
+		return &JoinEvent{
+			Actions: actions,
+		}, nil
+	default:
+		panic("invalid action")
+	}
 }
 
 func (d *EventDoc) Validate() error {
@@ -255,8 +457,9 @@ func (d *EventDoc) Elements() []Element {
 }
 
 type MessageEventDoc struct {
-	Role  string `json:"role"`
-	Topic string `json:"topic"`
+	Role  string      `json:"role"`
+	Topic string      `json:"topic"`
+	Do    []ActionDoc `json:"do"`
 }
 
 func (d *MessageEventDoc) Validate() error {
@@ -268,10 +471,13 @@ func (d *MessageEventDoc) Validate() error {
 
 func (d *MessageEventDoc) Elements() []Element { return nil }
 
-type ElapsedEventDoc string
+type ElapsedEventDoc struct {
+	Duration string      `json:"duration"`
+	Do       []ActionDoc `json:"do"`
+}
 
 func (d *ElapsedEventDoc) Validate() error {
-	if _, err := time.ParseDuration(string(*d)); err != nil {
+	if _, err := time.ParseDuration(d.Duration); err != nil {
 		return NewNotValid(err.Error())
 	}
 	return nil
@@ -279,7 +485,9 @@ func (d *ElapsedEventDoc) Validate() error {
 
 func (d *ElapsedEventDoc) Elements() []Element { return nil }
 
-type JoinEventDoc struct{}
+type JoinEventDoc struct {
+	Do []ActionDoc `json:"do"`
+}
 
 func (d *JoinEventDoc) Validate() error { return nil }
 
@@ -313,17 +521,20 @@ func (d *RestartDoc) Validate() error { return nil }
 
 func (d *RestartDoc) Elements() []Element { return nil }
 
+type ShutdownDoc struct{}
+
+func (d *ShutdownDoc) Validate() error { return nil }
+
+func (d *ShutdownDoc) Elements() []Element { return nil }
+
 type SendDoc struct {
-	Dst      string          `json:"dst"`
-	Role     string          `json:"role"`
-	Topic    string          `json:"topic"`
-	Contents json.RawMessage `json:"contents"`
+	Dst      string            `json:"dst"`
+	Role     string            `json:"role"`
+	Topic    string            `json:"topic"`
+	Contents map[string]string `json:"contents"`
 }
 
 func (d *SendDoc) Validate() error {
-	if d.Dst == "" {
-		return errors.Wrap(NewNotValid("send"), "missing dst")
-	}
 	if d.Topic == "" {
 		return errors.Wrap(NewNotValid("send"), "missing topic")
 	}
@@ -352,6 +563,19 @@ func (d SplitDoc) Elements() []Element {
 type EntryPointDoc struct {
 	Enter string            `json:"enter"`
 	Set   map[string]string `json:"set,omitempty"`
+}
+
+func (d *EntryPointDoc) ToAST() (SplitEntry, error) {
+	if err := d.Validate(); err != nil {
+		return SplitEntry{}, errors.WithStack(err)
+	}
+	result := SplitEntry{
+		State: d.Enter,
+	}
+	for k, v := range d.Set {
+		result.Locals[k] = v
+	}
+	return result, nil
 }
 
 func (d *EntryPointDoc) Validate() error {

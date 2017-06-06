@@ -147,7 +147,11 @@ func (c *Context) Enter(state State, locals map[string]interface{}) {
 	switch st := state.(type) {
 	case *SingularState:
 		c.state = st
-		c.actions = st.do
+		actions := make([]Action, len(st.do))
+		for i := range st.do {
+			actions[i] = st.do[i]
+		}
+		c.actions = actions
 		c.index = -1
 		c.locals = locals
 	case *CompositeState:
@@ -308,10 +312,13 @@ func (a *When) Do(c *Context) {
 	}
 }
 
-type Exit struct{}
+var ErrShutdown = errors.New("shutdown")
 
-func (a *Exit) Do(c *Context) {
-	c.splits.Kill(nil)
+type Shutdown struct{}
+
+func (a *Shutdown) Do(c *Context) {
+	c.actions = c.actions[:c.index+1]
+	c.splits.Kill(ErrShutdown)
 }
 
 type Split []SplitEntry
@@ -488,12 +495,13 @@ func (mb *MessageBus) relay(chIn <-chan *Message, chOut chan<- *Message) func() 
 
 func (mb *MessageBus) SubscribeTopic(topic string) <-chan *Message {
 	mb.mu.RLock()
-	defer mb.mu.RUnlock()
-
 	ch, ok := mb.topicsOut[topic]
+	mb.mu.RUnlock()
 	if !ok {
+		mb.mu.Lock()
 		ch = make(chan *Message)
 		mb.topicsOut[topic] = ch
+		mb.mu.Unlock()
 	}
 	return ch
 }
