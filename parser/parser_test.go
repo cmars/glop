@@ -106,3 +106,36 @@ func TestSplitFault(t *testing.T) {
 	assert.True(ok, "expected LogAction, got %+T", start.Fault[0])
 	assert.Equal("bad things", log.Message)
 }
+
+func TestStates(t *testing.T) {
+	assert := assert.New(t)
+	input := `
+state start {
+  goto foo
+}
+
+states demo {
+  state foo {
+    log "in foo"
+    goto bar
+  }
+  state bar {
+    log "in bar"
+    log "end"
+  }
+}`
+
+	l := lexer.New(input)
+	p := New(l)
+
+	root, err := p.Parse()
+	assert.NotNil(root)
+	assert.Nil(err)
+	assert.Len(root.States, 2)
+	demo, ok := root.States[1].(*ast.NestedState)
+	assert.True(ok, "expected NestedState, got %+T", root.States[1])
+	assert.NotNil(demo.ID)
+	assert.Equal("demo", demo.ID.Name, "expected 'demo', got %q", demo.ID.Name)
+	assert.Len(demo.States, 2, "expected 2 nested states, found %d", len(demo.States))
+	assert.Empty(demo.Fault, "expected 0 fault actions, found %d", len(demo.Fault))
+}

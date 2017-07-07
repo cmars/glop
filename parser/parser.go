@@ -88,7 +88,36 @@ func (p *Parser) parseState() (ast.State, error) {
 }
 
 func (p *Parser) parseNestedState() (*ast.NestedState, error) {
-	panic("TODO")
+	st := &ast.NestedState{Token: p.curToken}
+	if err := p.assertPeek(token.IDENT); err != nil {
+		return nil, errors.WithStack(err)
+	}
+	st.ID = &ast.StateID{Token: p.curToken, Name: p.curToken.Literal}
+
+	if err := p.assertPeek(token.LBRACE); err != nil {
+		return nil, errors.WithStack(err)
+	}
+	p.nextToken() // LBRACE
+
+	for p.curToken.Type != token.RBRACE {
+		sub, err := p.parseState()
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+		st.States = append(st.States, sub)
+		p.nextToken()
+	}
+	if p.peekToken.Type == token.FAULT {
+		err := p.assert(token.RBRACE)
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+		st.Fault, err = p.parseFault()
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+	}
+	return st, nil
 }
 
 func (p *Parser) parseSingularState() (*ast.SingularState, error) {
@@ -208,4 +237,31 @@ func (p *Parser) parseLog() (*ast.LogAction, error) {
 	}
 	g.Message = p.curToken.Literal
 	return g, nil
+}
+
+func (p *Parser) parseSpawn() (*ast.SpawnAction, error) {
+	a := &ast.SpawnAction{Token: p.curToken, Args: ast.KeywordArgs{}}
+	if err := p.assertPeek(token.IDENT); err != nil {
+		return nil, errors.WithStack(err)
+	}
+	a.ID = &ast.StateID{Token: p.curToken, Name: p.curToken.Literal}
+	if err := p.assertPeek(token.LPAREN); err != nil {
+		return nil, errors.WithStack(err)
+	}
+	for p.curToken.Type != token.RPAREN {
+		if err := p.assertPeek(token.IDENT); err != nil {
+			return nil, errors.WithStack(err)
+		}
+		k := p.curToken.Literal
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+		a.Args[k] = expr
+	}
+	return a, nil
+}
+
+func (p *Parser) parseExpression() (ast.Expression, error) {
+	panic("TODO")
 }

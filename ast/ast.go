@@ -18,6 +18,11 @@ type Action interface {
 	actionNode()
 }
 
+type Expression interface {
+	Node
+	expressionNode()
+}
+
 type SingularState struct {
 	Token token.Token
 	ID    *StateID
@@ -32,6 +37,7 @@ type NestedState struct {
 	Token  token.Token
 	ID     *StateID
 	States []State
+	Fault  []Action
 }
 
 func (*NestedState) stateNode()             {}
@@ -53,7 +59,7 @@ type GotoAction struct {
 }
 
 func (*GotoAction) actionNode()            {}
-func (s *GotoAction) TokenLiteral() string { return s.Token.Literal }
+func (g *GotoAction) TokenLiteral() string { return g.Token.Literal }
 
 type LogAction struct {
 	Token   token.Token
@@ -61,7 +67,7 @@ type LogAction struct {
 }
 
 func (*LogAction) actionNode()            {}
-func (s *LogAction) TokenLiteral() string { return s.Token.Literal }
+func (a *LogAction) TokenLiteral() string { return a.Token.Literal }
 
 type StateID struct {
 	Token token.Token
@@ -69,3 +75,14 @@ type StateID struct {
 }
 
 func (s *StateID) TokenLiteral() string { return s.Token.Literal }
+
+type SpawnAction struct {
+	Token token.Token
+	ID    *StateID
+	Args  KeywordArgs
+}
+
+type KeywordArgs map[string]Expression
+
+func (*SpawnAction) actionNode()            {}
+func (a *SpawnAction) TokenLiteral() string { return a.Token.Literal }
