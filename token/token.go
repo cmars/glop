@@ -56,6 +56,20 @@ const (
 	FALSE     = "FALSE"
 )
 
+func Keyword(token string) Token {
+	tt := TokenType(token)
+	for k, v := range keywords {
+		if v == tt {
+			return Token{tt, k}
+		}
+	}
+	return Token{tt, token}
+}
+
+func Ident(id string) Token {
+	return Token{TokenType(IDENT), id}
+}
+
 var keywords = map[string]TokenType{
 	"state":     STATE,
 	"fault":     FAULT,
