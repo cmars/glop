@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+#[derive(Debug, PartialEq)]
 pub enum State {
     SingularState {
         name: String,
@@ -43,6 +44,7 @@ impl State {
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub enum Action {
     Goto(Identifier),
     Assert(Expression),
@@ -62,11 +64,13 @@ pub enum Action {
     },
 }
 
+#[derive(Debug, PartialEq)]
 pub struct When {
     pub expr: Expression,
     pub actions: Vec<Action>,
 }
 
+#[derive(Debug, PartialEq)]
 pub enum EventHandler {
     Message {
         identifier: Option<Identifier>,
@@ -96,6 +100,7 @@ impl EventHandler {
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub enum Expression {
     Int(i32),
     String(String),
@@ -108,11 +113,13 @@ pub enum Expression {
 
 pub type Identifier = String;
 
+#[derive(Debug, PartialEq)]
 pub enum UnOp {
+    Neg,
     Not,
-    Minus,
 }
 
+#[derive(Debug, PartialEq)]
 pub enum BinOp {
     Add,
     Sub,

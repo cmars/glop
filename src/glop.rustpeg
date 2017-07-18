@@ -64,6 +64,7 @@ actions -> Vec<Action>
 	= a:action __ aa:actions { let mut aa = aa; aa.insert(0, a); aa }
 	/ a:action { vec![a] }
 
+#[pub]
 action -> Action
 	= "goto" __ id:identifier { Action::Goto(id) }
 	/ "assert" __ expr:expression { Action::Assert(expr) }
@@ -104,6 +105,7 @@ events -> Vec<EventHandler>
 	= ev:event __ evs:events { let mut evs = evs; evs.insert(0, ev); evs }
 	/ ev:event { vec![ev] }
 
+#[pub]
 event -> EventHandler
 	= e:eventdecl __ "{" a:actions "}" { let mut e = e; e.set_actions(a); e }
 
@@ -132,13 +134,50 @@ duration -> Duration
 		Duration::new(i as u64, 0)
 	}
 
+#[pub]
 expression -> Expression
-	= id:identifier { Expression::Identifier(id) }
-	/ s:strval { Expression::String(s) }
-	/ i:intval { Expression::Int(i) }
+	= logical
+
+logical -> Expression
+	= l:cmp __ "&&" __ r:cmp { Expression::BinOp(Box::new(l), BinOp::And, Box::new(r)) }
+	/ l:cmp __ "||" __ r:cmp { Expression::BinOp(Box::new(l), BinOp::Or, Box::new(r)) }
+	/ cmp
+
+cmp -> Expression
+	= l:sum __ "==" __ r:sum { Expression::BinOp(Box::new(l), BinOp::Equal, Box::new(r)) }
+	/ l:sum __ "!=" __ r:sum { Expression::BinOp(Box::new(l), BinOp::NotEqual, Box::new(r)) }
+	/ l:sum __ ">" __ r:sum { Expression::BinOp(Box::new(l), BinOp::Gt, Box::new(r)) }
+	/ l:sum __ ">=" __ r:sum { Expression::BinOp(Box::new(l), BinOp::GtEqual, Box::new(r)) }
+	/ l:sum __ "<" __ r:sum { Expression::BinOp(Box::new(l), BinOp::Lt, Box::new(r)) }
+	/ l:sum __ "<=" __ r:sum { Expression::BinOp(Box::new(l), BinOp::LtEqual, Box::new(r)) }
+	/ sum
+
+sum -> Expression
+	= l:product __ "+" __ r:product { Expression::BinOp(Box::new(l), BinOp::Add, Box::new(r)) }
+	/ l:product __ "-" __ r:product { Expression::BinOp(Box::new(l), BinOp::Sub, Box::new(r)) }
+	/ product
+
+product -> Expression
+	= l:unary __ "*" __ r:unary { Expression::BinOp(Box::new(l), BinOp::Mul, Box::new(r)) }
+	/ l:unary __ "/" __ r:unary { Expression::BinOp(Box::new(l), BinOp::Div, Box::new(r)) }
+	/ unary
+
+unary -> Expression
+	= "-" __ a:scope { Expression::UnOp(UnOp::Neg, Box::new(a)) }
+	/ "!" __ a:scope { Expression::UnOp(UnOp::Not, Box::new(a)) }
+	/ scope
+
+scope -> Expression
+	= "(" __ e:expression __ ")" { e }
+	/ atom
+
+atom -> Expression
+	= i:intval { Expression::Int(i) }
 	/ b:boolval {Expression::Bool(b) }
+	/ s:strval { Expression::String(s) }
+	/ id:identifier { Expression::Identifier(id) }
+
 /*
-	/ le:expression __ "*" __ re:expression { Expression::BinOp(Box::new(le), BinOp::Mul, Box::new(re)) }
 	/ le:expression __ "/" __ re:expression { Expression::BinOp(Box::new(le), BinOp::Div, Box::new(re)) }
 	/ le:expression __ "&&" __ re:expression { Expression::BinOp(Box::new(le), BinOp::And, Box::new(re)) }
 	/ le:expression __ "||" __ re:expression { Expression::BinOp(Box::new(le), BinOp::Or, Box::new(re)) }
