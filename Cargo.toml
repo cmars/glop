@@ -1,0 +1,14 @@
+[package]
+name = "glop"
+version = "1.0.0"
+description = "Glue Language for OPerations"
+license = "Apache-2.0"
+authors = ["Casey Marshall <glop@cmars.tech>"]
+repository = "https://github.com/glop-rs/glop"
+build = "build.rs"
+
+[build-dependencies]
+peg = { version = "0.4" }
+
+[dependencies]
+

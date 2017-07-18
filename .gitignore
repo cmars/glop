@@ -1,0 +1,7 @@
+target
+Cargo.lock
+.*.swp
+dist/snappy/parts
+dist/snappy/prime
+dist/snappy/stage
+dist/snappy/glop*.snap

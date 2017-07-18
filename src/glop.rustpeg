@@ -1,0 +1,193 @@
+use std::collections::HashMap;
+use std::time::Duration;
+
+use ast::*;
+
+#[pub]
+state -> State
+	= s:statedecl __ f:fault { let mut s = s; s.set_fault(f); s }
+	/ s:statedecl { s }
+
+statedecl -> State
+	= "state" __ id:identifier __ "{" __ a:actions __ "}" {
+		State::SingularState{
+			name: id,
+			actions: a,
+			fault: vec![],
+		}
+	}
+
+states -> State
+	= s:statesdecl __ f:fault { let mut s = s; s.set_fault(f); s }
+	/ s:statesdecl { s }
+
+statesdecl -> State
+	= "states" __ id:identifier __ "{" __ s:substates __ "}" {
+		State::NestedState{
+			name: id,
+			states: s,
+			fault: vec![],
+		}
+	}
+
+split -> State
+	= s:splitdecl __ f:fault { let mut s = s; s.set_fault(f); s }
+
+splitdecl -> State
+	= "split" __ id:identifier __ "{" __ s:splitlabels __ "}" {
+		State::SplitState{
+			name: id,
+			splits: s,
+			fault: vec![],
+		}
+	}
+
+splitlabels -> Vec<String>
+	= s:identifier __ "|" __ ss:splitlabels { let mut ss = ss; ss.insert(0, s); ss }
+	/ s:identifier { vec![s] }
+
+substates -> HashMap<String, State>
+	= s:substate __ ss:substates { let mut ss = ss; ss.insert(s.name().to_string(), s); ss }
+	/ s:substate {
+		let mut ss = HashMap::new();
+		ss.insert(s.name().to_string(), s);
+		ss
+	}
+
+substate -> State
+	= state / states / split
+
+fault -> Vec<Action>
+	= "fault" __ "{" __ a:actions __ "}" { a }
+
+actions -> Vec<Action>
+	= a:action __ aa:actions { let mut aa = aa; aa.insert(0, a); aa }
+	/ a:action { vec![a] }
+
+action -> Action
+	= "goto" __ id:identifier { Action::Goto(id) }
+	/ "assert" __ expr:expression { Action::Assert(expr) }
+	/ "log" __ expr:expression { Action::Log(expr) }
+	/ ws:whens { Action::Conditional{ conditions: ws, otherwise: vec![] } }
+	/ ws:whens __ "otherwise" __ "{" __ a:actions __ "}" {
+		Action::Conditional{ conditions: ws, otherwise: a }
+	}
+	/ "shutdown" { Action::Shutdown }
+	/ "spawn" __ expr:expression { Action::Spawn(expr) }
+	/ "await" __ "{" __ ev:events __ "}" { Action::Await(ev) }
+	/ "send" __ "to" __ dst:expression __ "topic" __ topic:expression __ role:maybe_role __ "(" __ contents:expression __ ")" {
+		Action::Send{
+			dst: dst,
+			topic: topic,
+			role: role,
+			contents: contents,
+		}
+	}
+
+maybe_role -> Option<Expression>
+	= "role" __ role:maybe_expression { role }
+
+maybe_expression -> Option<Expression>
+	= expr:expression { Some(expr) }
+	/ { None }
+
+whens -> Vec<When>
+	= w:when __ ws:whens { let mut ws = ws; ws.insert(0, w); ws }
+	/ w:when { vec![w] }
+
+when -> When
+	= "when" expr:expression __ "{" __ a:actions __ "}" {
+		When{ expr: expr, actions: a }
+	}
+
+events -> Vec<EventHandler>
+	= ev:event __ evs:events { let mut evs = evs; evs.insert(0, ev); evs }
+	/ ev:event { vec![ev] }
+
+event -> EventHandler
+	= e:eventdecl __ "{" a:actions "}" { let mut e = e; e.set_actions(a); e }
+
+eventdecl -> EventHandler
+	= "message" __ "topic" __ topic:expression __ role:maybe_role __ id:maybe_identifier {
+		EventHandler::Message{
+			topic: topic,
+			role: role,
+			identifier: id,
+			actions: vec![],
+		}
+	}
+	/ "elapsed" __ d:duration {
+		EventHandler::Elapsed{
+			duration: d,
+			actions: vec![],
+		}
+	}
+
+maybe_identifier -> Option<Identifier>
+	= id:identifier { Some(id) }
+	/ { None }
+
+duration -> Duration
+	= i:intval "s" {
+		Duration::new(i as u64, 0)
+	}
+
+expression -> Expression
+	= id:identifier { Expression::Identifier(id) }
+	/ s:strval { Expression::String(s) }
+	/ i:intval { Expression::Int(i) }
+	/ b:boolval {Expression::Bool(b) }
+/*
+	/ le:expression __ "*" __ re:expression { Expression::BinOp(Box::new(le), BinOp::Mul, Box::new(re)) }
+	/ le:expression __ "/" __ re:expression { Expression::BinOp(Box::new(le), BinOp::Div, Box::new(re)) }
+	/ le:expression __ "&&" __ re:expression { Expression::BinOp(Box::new(le), BinOp::And, Box::new(re)) }
+	/ le:expression __ "||" __ re:expression { Expression::BinOp(Box::new(le), BinOp::Or, Box::new(re)) }
+	/ le:expression __ "==" __ re:expression { Expression::BinOp(Box::new(le), BinOp::Or, Box::new(re)) }
+*/
+
+strval -> String
+	= "\"" s:$([^"]+) "\"" {
+		s.to_string()
+	}
+
+intval -> i32
+	= s:$([0-9]+) {?
+		s.parse::<i32>().map_err(|_| "invalid number")
+	}
+
+boolval -> bool
+	= "true" { true} / "false" { false }
+
+identifier -> String
+	= v:$([a-z][a-z0-9_^.]+) { String::from(v) }
+
+/* The following is borrowed from rust-peg's own grammar */
+
+__ = (whitespace / eol / comment)*
+
+/* Modeled after ECMA-262, 5th ed., 7.4. */
+comment
+  = singleLineComment
+  / multiLineComment
+
+singleLineComment
+  = "//" (!eolChar .)*
+
+multiLineComment
+  = "/*" (!"*/" .)* "*/"
+
+/* Modeled after ECMA-262, 5th ed., 7.3. */
+eol
+  = "\n"
+  / "\r\n"
+  / "\r"
+  / "\u{2028}"
+  / "\u{2029}"
+
+eolChar
+  = [\n\r\u{2028}\u{2029}]
+
+/* Modeled after ECMA-262, 5th ed., 7.2. */
+whitespace
+  = [ \t\u{00A0}\u{FEFF}\u{1680}\u{180E}\u{2000}-\u{200A}\u{202F}\u{205F}\u{3000}] // \v\f removed
+

@@ -1,0 +1,71 @@
+# An example ping/pong glop agent.
+#
+# TODO: need a consistent kvarg & structured data convention 
+split start { pinger | ponger } fault { goto start }
+
+states pinger {
+	state start {
+		await {
+			message "peer_request" role "pingable" peermsg {
+				spawn send_ping (peer peermsg)
+			}
+		}
+		goto start
+	}
+
+	state send_ping {
+		send to peer.src topic "ping" ("ping")
+		await {
+			message (topic "pong", role "pingable")
+			elapsed (after 15s) {
+				assert false
+			}
+		}
+	} fault {
+		when ping_attempts > 10 {
+			log "max attempts exceeded, giving up on peer"
+		} otherwise {
+			when undefined(ping_attempts) {
+				set ping_attempts = 1
+			} otherwise {
+				set ping_attempts = ping_attempts + 1
+			}
+		}
+		goto send_ping
+	}
+}
+
+# The ponger states reply to introductions by advertising itself as pingable, and to
+# pings with pongs.
+states ponger {
+	split start { handle_intro | handle_ping } fault { goto start }
+
+	state handle_intro {
+		await {
+			message (topic "intro") intromsg {
+        		send to intromsg.src topic "peer_request" role "pingable" ()
+			}
+		}
+	} fault {
+        log "failed to reply with peer_request"
+        goto handle_intro
+	}
+
+    state handle_ping {
+        await {
+			message (topic "ping") pingmsg {
+        		send (dst pingmsg.src, topic "pong", contents "pong")
+			}
+		}
+    } fault {
+        log "failed to reply with pong"
+        goto handle_ping
+	}
+}
+# Further notes:
+#
+# Log messages could be templates with access to context variables.
+#
+# A shortcut for the split - await/join - assert:false idiom could be a top-level split:
+# alternative to "do:" and "states:"
+#
